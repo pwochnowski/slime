@@ -114,7 +114,7 @@ class ServerGroup:
                 for key, default_val in {
                     "SGLANG_JIT_DEEPGEMM_PRECOMPILE": "true",
                     "SGLANG_JIT_DEEPGEMM_FAST_WARMUP": "true",
-                    "SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
+                    "SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
                     "SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
                     "SGLANG_MEMORY_SAVER_CUDA_GRAPH": "true",
                     "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_FALLBACK_VARIANT": "true",
