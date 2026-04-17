@@ -1,3 +1,83 @@
+[project]
+name = "slime"
+version = "0.2.4"
+description = "RL training framework around SGLang + Megatron-LM"
+requires-python = ">=3.12"
+dependencies = [
+    # --- from requirements.txt ---
+    "accelerate",
+    "blobfile",
+    "datasets",
+    "httpx[http2]",
+    "mcp[cli]",
+    "memray",
+    "numba",
+    "numpy<2",
+    "omegaconf",
+    "pillow",
+    "pylatexenc",
+    "pyyaml",
+    "qwen-vl-utils",
+    "ray[default]",
+    "ring-flash-attn",
+    "sglang-router",
+    "tensorboard",
+    "transformers",
+    "wandb",
+    # --- torch stack (CPU wheels are fine: IDE only) ---
+    "torch",
+    "torchvision",
+    "torchaudio",
+    # --- other top-level imports used by slime/slime_plugins ---
+    "aiohttp",
+    "fastapi",
+    "flash-linear-attention",
+    "mbridge",
+    "openai",
+    "psutil",
+    "pybase64",
+    "pydantic",
+    "requests",
+    "sympy",
+    "tqdm",
+    "typer",
+    "uvicorn",
+    "py-spy>=0.4.1",
+]
+
+[project.optional-dependencies]
+# Heavy / CUDA-toolchain-required packages. Opt in with:
+#     uv sync --extra cuda
+# These will need a working nvcc + matching torch; they are off by default
+# so a bare `uv sync` succeeds for IDE-only use.
+cuda = [
+    "flash-attn",
+    "nvidia-modelopt[torch]",
+    "tilelang",
+    "torch-memory-saver",
+    "transformer-engine[pytorch]",
+]
+
+[tool.uv]
+# Virtual project: don't try to build/install slime itself. slime's source
+# lives in-tree and is picked up via the IDE / PYTHONPATH, not via the
+# (conflicting) setup.py-based build.
+package = false
+
+[tool.uv.sources]
+# mbridge is git-only.
+mbridge = { git = "https://github.com/ISEEKYAN/mbridge.git" }
+
+# IDE (pyright / pylance) go-to-definition for local checkouts that we do NOT
+# install via uv — their transitive deps (flashinfer, sglang-kernel, apex, …)
+# do not resolve cleanly on a stock machine. The source on disk is enough
+# for static analysis.
+[tool.pyright]
+extraPaths = [
+    "/home/paul/repos/sglang/python",
+    "/home/paul/repos/Megatron-LM",
+]
+
 [build-system]
 requires = [
     "packaging",
@@ -66,4 +146,9 @@ markers = [
     "docs: mark tests related to documentation (deselect with '-m \"not docs\"')",
     "skipduringci: marks tests that are skipped ci as they are addressed by Jenkins jobs but should be run to test user setups",
     "pleasefixme: marks tests that are broken and need fixing",
+]
+
+[dependency-groups]
+dev = [
+    "setuptools>=82.0.1",
 ]
