@@ -29,7 +29,7 @@ def _patch_bridge_expert_cache_to_cpu():
     def _patched(self, task, converted_weights_dict):
         cpu_dict = {k: v.cpu() for k, v in converted_weights_dict.items()}
         result = _orig(self, task, cpu_dict)
-        # Move merged result back to GPU for CUDA IPC serialization
+        # Move merged result back to GPU for weight transfer
         return {k: v.cuda() for k, v in result.items()} if result else result
 
     GPTOSSBridge.maybe_modify_converted_hf_weight = _patched
