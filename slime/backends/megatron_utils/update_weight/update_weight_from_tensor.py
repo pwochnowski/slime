@@ -1,3 +1,6 @@
+import os
+import threading
+import uuid
 from argparse import Namespace
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -8,10 +11,16 @@ import torch.distributed as dist
 from megatron.core import mpu
 from ray import ObjectRef
 from ray.actor import ActorHandle
+from sglang.srt.weight_sync.vmm_ipc import (
+    alloc_vmm_buffer,
+    free_vmm_buffer,
+    open_sidecar_listener,
+    send_fd,
+    wrap_as_torch_uint8,
+)
 
 from slime.utils.distributed_utils import get_gloo_group
 
-from ..sglang import FlattenedTensorBucket, MultiprocessingSerializer
 from .hf_weight_iterator_base import HfWeightIteratorBase
 from .update_weight_from_distributed import (
     connect_rollout_engines_from_distributed,
@@ -25,7 +34,7 @@ class UpdateWeightFromTensor:
     """
     Update rollout engines from tensor dict:
     load(dict→GPU) → broadcast PP/EP(GPU NCCL) → gather TP(GPU NCCL) → convert HF(GPU) → send.
-    Colocated: GPU→CPU serialize → gather_object(Gloo CPU, collects from rollout_num_gpus_per_engine ranks) → Ray IPC to engine.
+    Colocated: GPU tensors → VMM buffer → fd over UDS → gather_object(Gloo, metadata only) → Ray HTTP to engine.
     Distributed: GPU NCCL broadcast to remote engines.
     """
 
@@ -156,18 +165,12 @@ class UpdateWeightFromTensor:
         megatron_local_weights = self.weights_getter()
 
         for hf_named_tensors in self._hf_weight_iterator.get_hf_weight_chunks(megatron_local_weights):
-            refs, long_lived_tensors = self._send_hf_params(hf_named_tensors)
+            refs, vmm_resources = self._send_hf_params(hf_named_tensors)
             ray.get(refs)
-            # Free GPU tensors so the caching allocator can reuse the blocks,
-            # then release CUDA IPC cache entries whose consumers (sglang engines)
-            # have already closed their IPC handles.
-            del long_lived_tensors, hf_named_tensors
-            torch.cuda.ipc_collect()
+            _cleanup_vmm_resources(vmm_resources)
+            del hf_named_tensors
 
         dist.barrier(group=get_gloo_group())
-        # After the barrier all engines have returned, so every rank's last-chunk
-        # IPC handles are now released by the consumers.  Clean them up.
-        torch.cuda.ipc_collect()
 
         # int4/fp4 post_process
         if rank == 0:
@@ -183,7 +186,7 @@ class UpdateWeightFromTensor:
     def _send_hf_params(self, hf_named_tensors) -> tuple[list[ObjectRef], Any]:
         all_refs = []
 
-        refs_colocated, long_lived_tensors = _send_to_colocated_engine(
+        refs_colocated, vmm_resources = _send_to_colocated_engine(
             hf_named_tensors,
             ipc_engine=self._ipc_engine,
             ipc_gather_src=self._ipc_gather_src,
@@ -203,7 +206,7 @@ class UpdateWeightFromTensor:
             if refs_distributed:
                 all_refs.extend(refs_distributed)
 
-        return all_refs, long_lived_tensors
+        return all_refs, vmm_resources
 
 
 def _send_to_colocated_engine(
@@ -219,49 +222,76 @@ def _send_to_colocated_engine(
     if ipc_gather_group is None:
         return [], None
 
-    long_live_tensors = []
+    device = torch.cuda.current_device()
 
-    if getattr(FlattenedTensorBucket, "supports_multi_dtypes", False):
-        converted_named_tensors_by_dtypes = {"dtype": hf_named_tensors}
-    else:
-        converted_named_tensors_by_dtypes = {}
-        for name, tensor in hf_named_tensors:
-            dtype = tensor.dtype
-            if dtype not in converted_named_tensors_by_dtypes:
-                converted_named_tensors_by_dtypes[dtype] = []
-            converted_named_tensors_by_dtypes[dtype].append((name, tensor))
+    # 1. Flatten all tensors to a single uint8 buffer with per-tensor metadata.
+    metadata = []
+    flat_parts = []
+    total_bytes = 0
+    for name, tensor in hf_named_tensors:
+        flat = tensor.flatten().view(torch.uint8)
+        metadata.append({
+            "name": name,
+            "shape": list(tensor.shape),
+            "dtype": str(tensor.dtype).replace("torch.", ""),
+            "start_idx": total_bytes,
+            "end_idx": total_bytes + flat.numel(),
+        })
+        flat_parts.append(flat)
+        total_bytes += flat.numel()
 
-    serialized_tensors = []
-    for _dtype, named_tensors in converted_named_tensors_by_dtypes.items():
-        flattened_tensor_bucket = FlattenedTensorBucket(named_tensors=named_tensors)
-        metadata = flattened_tensor_bucket.get_metadata()
-        flattened_tensor_data = {
-            "flattened_tensor": flattened_tensor_bucket.get_flattened_tensor(),
-            "metadata": metadata,
-        }
-        long_live_tensors.append(flattened_tensor_data)
-        serialized_tensors.append(MultiprocessingSerializer.serialize(flattened_tensor_data, output_str=True))
+    # 2. Allocate VMM buffer and copy flattened data.
+    alloc = alloc_vmm_buffer(total_bytes, device)
+    buf = wrap_as_torch_uint8(alloc)
+    torch.cat(flat_parts, out=buf[:total_bytes])
+    torch.cuda.synchronize(device)
+    del flat_parts
 
-    serialized_named_tensors = (
+    # 3. UDS listener -- serves the VMM fd to the SGLang consumer.
+    uds_path = f"/tmp/slime-vmm-{uuid.uuid4()}.sock"
+    listener = open_sidecar_listener(uds_path)
+
+    def _serve():
+        conn, _ = listener.accept()
+        send_fd(conn, alloc.fd)
+        conn.close()
+        listener.close()
+
+    fd_thread = threading.Thread(target=_serve, daemon=True)
+    fd_thread.start()
+
+    # 4. Gather lightweight metadata to src rank (not serialized tensors).
+    device_uuid = f"GPU-{torch.cuda.get_device_properties(device).uuid!s}"
+    my_info = {"uds_path": uds_path, "device_uuid": device_uuid, "buffer_size": alloc.size}
+    gather_list = (
         [None] * dist.get_world_size(ipc_gather_group) if ipc_gather_src == dist.get_rank() else None
     )
-    dist.gather_object(
-        serialized_tensors,
-        object_gather_list=serialized_named_tensors,
-        dst=ipc_gather_src,
-        group=ipc_gather_group,
-    )
+    dist.gather_object(my_info, object_gather_list=gather_list, dst=ipc_gather_src, group=ipc_gather_group)
 
+    # 5. Src rank calls the VMM endpoint on the engine.
     refs = []
     if dist.get_rank() == ipc_gather_src:
-        # TODO: here we assume all ranks have the same number of dtypes, not sure if that is correct.
-        num_dtypes = len(serialized_named_tensors[0])
-        for i in range(num_dtypes):
-            kwargs = {
-                "serialized_named_tensors": [tensors[i] for tensors in serialized_named_tensors],
-                "load_format": "flattened_bucket",
-                "weight_version": str(weight_version),
-            }
-            refs.append(ipc_engine.update_weights_from_tensor.remote(**kwargs))
+        refs.append(
+            ipc_engine.update_weights_from_tensor_vmm.remote(
+                uds_paths={g["device_uuid"]: g["uds_path"] for g in gather_list},
+                buffer_sizes={g["device_uuid"]: g["buffer_size"] for g in gather_list},
+                tensor_metadata=metadata,
+                weight_version=str(weight_version),
+            )
+        )
 
-    return refs, long_live_tensors
+    return refs, (fd_thread, alloc, buf, uds_path)
+
+
+def _cleanup_vmm_resources(vmm_resources) -> None:
+    if vmm_resources is None:
+        return
+    fd_thread, alloc, buf, uds_path = vmm_resources
+    # Thread blocks on accept() until consumer connects; join waits for fd send.
+    fd_thread.join(timeout=30)
+    del buf
+    free_vmm_buffer(alloc, close_fd=True)
+    try:
+        os.unlink(uds_path)
+    except FileNotFoundError:
+        pass
