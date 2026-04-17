@@ -240,11 +240,12 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[lis
     print(f"Rollout completed in {duration:.2f}s! Global worker queue size: {worker.get_queue_size()}")
 
     if data:
-        print(
-            f"Finish rollout: {[data[-1][0].prompt + data[-1][0].response]}, "
-            f"label: {data[-1][0].label}, reward: {data[-1][0].reward}",
-            flush=True,
-        )
+        pass
+        # print(
+        #     f"Finish rollout: {[data[-1][0].prompt + data[-1][0].response]}, "
+        #     f"label: {data[-1][0].label}, reward: {data[-1][0].reward}",
+        #     flush=True,
+        # )
 
     data = sorted(data, key=lambda group: group[0].index)
     return data

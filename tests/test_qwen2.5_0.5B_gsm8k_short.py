@@ -13,6 +13,8 @@ def prepare():
     U.exec_command(f"ln -sfn $(HF_HUB_OFFLINE=1 hf download Qwen/{MODEL_NAME}) /root/models/{MODEL_NAME}")
     # U.exec_command(f"huggingface-cli download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
     U.hf_download_dataset("zhuzilin/gsm8k")
+    os.environ["RAY_SILENT_MODE"] = "1"
+    os.environ["NCCL_CUMEM_ENABLE"] = "1"
 
 
 def execute():
@@ -78,6 +80,7 @@ def execute():
         f"--sglang-mem-fraction-static {0.5 if TIGHT_DEVICE_MEMORY else 0.7} "
         f"--sglang-cuda-graph-max-bs {16 if TIGHT_DEVICE_MEMORY else 32} "
         "--sglang-enable-metrics "
+        "--log-level warning"
     )
 
     # ci_args = "--ci-test "
