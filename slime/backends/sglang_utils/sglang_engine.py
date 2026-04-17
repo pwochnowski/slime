@@ -288,6 +288,28 @@ class SGLangEngine(RayActor):
             payload,
         )
 
+    def update_weights_from_tensor_vmm(
+        self,
+        uds_paths: dict[str, str],
+        buffer_sizes: dict[str, int],
+        tensor_metadata: list[dict],
+        flush_cache: bool = False,
+        weight_version: str | None = None,
+    ):
+        """Update model weights via VMM IPC (fd transport over Unix domain sockets)."""
+        payload = {
+            "uds_paths": uds_paths,
+            "buffer_sizes": buffer_sizes,
+            "tensor_metadata": tensor_metadata,
+            "flush_cache": flush_cache,
+        }
+        if weight_version is not None:
+            payload["weight_version"] = weight_version
+        return self._make_request(
+            "update_weights_from_tensor_vmm",
+            payload,
+        )
+
     def flush_cache(self):
         """Flush the cache of the server."""
         if self.node_rank != 0:
