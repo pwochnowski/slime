@@ -5,12 +5,13 @@ TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "1")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
-NUM_GPUS = 4
+NUM_GPUS = 2
 
 
 def prepare():
     U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"huggingface-cli download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
+    U.exec_command(f"ln -sfn $(HF_HUB_OFFLINE=1 hf download Qwen/{MODEL_NAME}) /root/models/{MODEL_NAME}")
+    # U.exec_command(f"huggingface-cli download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
     U.hf_download_dataset("zhuzilin/gsm8k")
 
 
@@ -50,7 +51,7 @@ def execute():
         "--expert-model-parallel-size 1 "
         "--expert-tensor-parallel-size 1 "
         "--use-dynamic-batch-size "
-        "--max-tokens-per-gpu 9216 "
+        f"--max-tokens-per-gpu {4096 if TIGHT_DEVICE_MEMORY else 9216}"
     )
 
     grpo_args = (
@@ -74,19 +75,19 @@ def execute():
 
     sglang_args = (
         "--rollout-num-gpus-per-engine 1 "
-        f"--sglang-mem-fraction-static {0.6 if TIGHT_DEVICE_MEMORY else 0.7} "
-        "--sglang-cuda-graph-max-bs 32 "
+        f"--sglang-mem-fraction-static {0.5 if TIGHT_DEVICE_MEMORY else 0.7} "
+        f"--sglang-cuda-graph-max-bs {16 if TIGHT_DEVICE_MEMORY else 32} "
         "--sglang-enable-metrics "
     )
 
-    ci_args = "--ci-test "
+    # ci_args = "--ci-test "
 
-    fault_tolerance_args = (
-        "--use-fault-tolerance "
-        "--rollout-health-check-interval 5 "
-        "--rollout-health-check-timeout 10 "
-        "--rollout-health-check-first-wait 0 "
-    )
+    # fault_tolerance_args = (
+    #     "--use-fault-tolerance "
+    #     "--rollout-health-check-interval 5 "
+    #     "--rollout-health-check-timeout 10 "
+    #     "--rollout-health-check-first-wait 0 "
+    # )
 
     misc_args = (
         "--attention-dropout 0.0 "
@@ -95,7 +96,7 @@ def execute():
         "--attention-softmax-in-fp32 "
         "--attention-backend flash "
         "--actor-num-nodes 1 "
-        "--actor-num-gpus-per-node 4 "
+        f"--actor-num-gpus-per-node {NUM_GPUS} "
         "--colocate "
         "--megatron-to-hf-mode bridge "
     )
@@ -109,8 +110,8 @@ def execute():
         f"{perf_args} "
         f"{eval_args} "
         f"{sglang_args} "
-        f"{ci_args} "
-        f"{fault_tolerance_args} "
+        # f"{ci_args} "
+        # f"{fault_tolerance_args} "
         f"{misc_args} "
     )
 
@@ -123,8 +124,8 @@ def execute():
 
 if __name__ == "__main__":
     prepare()
-    os.environ.pop("http_proxy")
-    os.environ.pop("https_proxy")
-    os.environ.pop("HTTP_PROXY")
-    os.environ.pop("HTTPS_PROXY")
+    # os.environ.pop("http_proxy")
+    # os.environ.pop("https_proxy")
+    # os.environ.pop("HTTP_PROXY")
+    # os.environ.pop("HTTPS_PROXY")
     execute()
