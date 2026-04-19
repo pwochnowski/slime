@@ -13,6 +13,7 @@ from slime.ray.ray_actor import RayActor
 from slime.utils.distributed_utils import init_gloo_group
 from slime.utils.logging_utils import configure_logger
 from slime.utils.memory_utils import clear_memory, print_memory
+from slime.utils.timer import Timer
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,9 @@ class TrainRayActor(RayActor):
     @abc.abstractmethod
     def _get_parallel_config(self):
         raise NotImplementedError
+
+    def add_timer(self, name, elapsed):
+        Timer().add(name, elapsed)
 
     def set_rollout_manager(self, rollout_manager):
         self.rollout_manager = rollout_manager

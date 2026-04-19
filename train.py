@@ -1,3 +1,5 @@
+from time import time
+
 import ray
 
 from slime.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
@@ -74,10 +76,14 @@ def train(args):
         if args.eval_interval is not None and rollout_id == 0 and not args.skip_eval_before_train:
             ray.get(rollout_manager.eval.remote(rollout_id))
 
+        t0 = time()
         rollout_data_ref = ray.get(rollout_manager.generate.remote(rollout_id))
+        actor_model.add_timer("rollout_generate", time() - t0)
 
         if args.offload_rollout:
+            t0 = time()
             ray.get(rollout_manager.offload.remote())
+            actor_model.add_timer("rollout_offload", time() - t0)
 
         if args.use_critic:
             critic_train_handle = critic_model.async_train(rollout_id, rollout_data_ref)
@@ -92,14 +98,20 @@ def train(args):
 
         offload_train(rollout_id)
         if args.offload_rollout:
+            t0 = time()
             ray.get(rollout_manager.onload_weights.remote())
+            actor_model.add_timer("rollout_onload_weights", time() - t0)
         if not args.critic_train_only:
             actor_model.update_weights()
         if args.offload_rollout:
+            t0 = time()
             ray.get(rollout_manager.onload_kv.remote())
+            actor_model.add_timer("rollout_onload_kv", time() - t0)
 
         if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch):
+            t0 = time()
             ray.get(rollout_manager.eval.remote(rollout_id))
+            actor_model.add_timer("eval", time() - t0)
 
     ray.get(rollout_manager.dispose.remote())
     finish_tracking(args)
