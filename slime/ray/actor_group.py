@@ -120,6 +120,19 @@ class RayTrainGroup:
         """Broadcast weights from rank 0 to all other ranks."""
         return ray.get([actor.update_weights.remote() for actor in self._actor_handlers])
 
+    def _get_actor_pids(self):
+        if not hasattr(self, "_actor_pids"):
+            self._actor_pids = ray.get([actor.get_pid.remote() for actor in self._actor_handlers])
+        return self._actor_pids
+
+    def gcr_suspend(self):
+        from slime.utils.gcr import suspend
+        suspend(self._get_actor_pids())
+
+    def gcr_resume(self):
+        from slime.utils.gcr import resume
+        resume(self._get_actor_pids())
+
     def onload(self):
         return ray.get([actor.wake_up.remote() for actor in self._actor_handlers])
 

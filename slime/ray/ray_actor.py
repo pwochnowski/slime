@@ -8,3 +8,6 @@ class RayActor:
 
     def get_master_addr_and_port(self):
         return self.master_addr, self.master_port
+
+    def get_pid(self):
+        return os.getpid()

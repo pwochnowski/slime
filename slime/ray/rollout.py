@@ -175,6 +175,26 @@ class ServerGroup:
         ]
         return init_handles, port_cursors
 
+    def gcr_suspend(self):
+        """Suspend GPU memory on all engines via GCR (non-blocking).
+
+        Returns a list of Ray ObjectRefs.  Skipped for groups that do not
+        overlap with megatron GPUs (``needs_offload=False``).
+        """
+        if not self.needs_offload:
+            return []
+        return [engine.gcr_suspend.remote() for engine in self.engines if engine is not None]
+
+    def gcr_resume(self):
+        """Resume GPU memory on all engines via GCR (non-blocking).
+
+        Returns a list of Ray ObjectRefs.  Skipped for groups that do not
+        overlap with megatron GPUs (``needs_offload=False``).
+        """
+        if not self.needs_offload:
+            return []
+        return [engine.gcr_resume.remote() for engine in self.engines if engine is not None]
+
     def offload(self):
         """Fire release_memory_occupation on all engines (non-blocking).
 
@@ -309,6 +329,20 @@ class RolloutServer:
                         for engine in all_resume_engines
                     ]
                 )
+
+    def gcr_suspend(self):
+        """Suspend GPU memory via GCR across all groups (concurrent)."""
+        handles = []
+        for g in self.server_groups:
+            handles.extend(g.gcr_suspend())
+        return ray.get(handles) if handles else []
+
+    def gcr_resume(self):
+        """Resume GPU memory via GCR across all groups (concurrent)."""
+        handles = []
+        for g in self.server_groups:
+            handles.extend(g.gcr_resume())
+        return ray.get(handles) if handles else []
 
     def offload(self):
         """Release memory occupation across all groups (concurrent)."""
@@ -507,6 +541,15 @@ class RolloutManager:
 
     def load(self, rollout_id=None):
         self.data_source.load(rollout_id)
+
+    def gcr_suspend(self):
+        self.health_monitoring_pause()
+        for srv in self.servers.values():
+            srv.gcr_suspend()
+
+    def gcr_resume(self):
+        for srv in self.servers.values():
+            srv.gcr_resume()
 
     def offload(self):
         self.health_monitoring_pause()

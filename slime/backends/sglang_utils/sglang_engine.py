@@ -376,6 +376,12 @@ class SGLangEngine(RayActor):
         response.raise_for_status()
         return response.json()["weight_version"]
 
+    def gcr_suspend(self):
+        return self._make_request("gcr_suspend")
+
+    def gcr_resume(self):
+        return self._make_request("gcr_resume")
+
     def release_memory_occupation(self):
         self.flush_cache()
         return self._make_request("release_memory_occupation")
