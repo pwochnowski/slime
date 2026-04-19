@@ -143,6 +143,7 @@ def execute_train(
                 "no_proxy": f"127.0.0.1,{master_addr}",
                 # This is needed by megatron / torch distributed in multi-node setup
                 "MASTER_ADDR": master_addr,
+                **({"GCR_HOME": os.environ["GCR_HOME"]} if "GCR_HOME" in os.environ else {}),
                 **(
                     {
                         "CUDA_ENABLE_COREDUMP_ON_EXCEPTION": "1",

@@ -12,7 +12,7 @@ import numpy as np
 import ray
 import torch
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
-from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
+
 
 from slime.backends.sglang_utils.sglang_config import ModelConfig, ServerGroupConfig, SglangConfig
 from slime.backends.sglang_utils.sglang_engine import SGLangEngine
@@ -120,6 +120,7 @@ class ServerGroup:
                     "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_FALLBACK_VARIANT": "true",
                     "SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION": "false",
                     "SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE": "false",
+                    "GCR_PRELOAD_PATH": os.environ.get("GCR_PRELOAD_PATH", ""),
                     "SLIME_ENABLE_PROFILING": "true",
                 }.items()
             }
@@ -195,32 +196,8 @@ class ServerGroup:
             return []
         return [engine.gcr_resume.remote() for engine in self.engines if engine is not None]
 
-    def offload(self):
-        """Fire release_memory_occupation on all engines (non-blocking).
-
-        Returns a list of Ray ObjectRefs.  Skipped for groups that do not
-        overlap with megatron GPUs (``needs_offload=False``).
-        """
-        if not self.needs_offload:
-            return []
-        return [engine.release_memory_occupation.remote() for engine in self.engines if engine is not None]
-
-    def onload(self, tags: list[str] | None = None):
-        """Fire resume_memory_occupation on all engines (non-blocking).
-
-        Returns a list of Ray ObjectRefs.  Skipped for groups that do not
-        overlap with megatron GPUs (``needs_offload=False``).
-        """
-        if not self.needs_offload:
-            return []
-        return [engine.resume_memory_occupation.remote(tags=tags) for engine in self.engines if engine is not None]
-
     def onload_weights_from_disk(self):
-        """Reload weights from ``model_path`` for non-updatable groups.
-
-        Used instead of ``resume_memory_occupation(tags=[WEIGHTS])`` so that
-        CPU memory is not consumed by offloaded weight copies.
-        """
+        """Reload weights from ``model_path`` for non-updatable groups."""
         if not self.needs_offload or not self.model_path:
             return []
         return [
@@ -301,34 +278,9 @@ class RolloutServer:
         if all_handles:
             ray.get(all_handles)
 
-        # Post-recovery: offload then onload weights for newly created engines.
-        release_handles = []
-        updatable_new_engines = []
-        non_updatable_groups_engines: list[tuple[str, list]] = []
         for g, dead_indices in zip(self.server_groups, dead_per_group, strict=True):
             logger.info(f"Recovered {g.num_new_engines} dead rollout engines (worker_type={g.worker_type})")
             assert g.num_new_engines == len(dead_indices), "num_new_engines does not match dead_indices length"
-            if g.needs_offload and dead_indices:
-                new_engines = [g.all_engines[i] for i in dead_indices]
-                release_handles.extend(engine.release_memory_occupation.remote() for engine in new_engines)
-                if self.update_weights:
-                    updatable_new_engines.extend(new_engines)
-                elif g.model_path:
-                    non_updatable_groups_engines.append((g.model_path, new_engines))
-
-        if release_handles:
-            ray.get(release_handles)
-            # Resume GPU memory for all engines that need offload.
-            all_resume_engines = updatable_new_engines[:]
-            for _model_path, engines in non_updatable_groups_engines:
-                all_resume_engines.extend(engines)
-            if all_resume_engines:
-                ray.get(
-                    [
-                        engine.resume_memory_occupation.remote(tags=[GPU_MEMORY_TYPE_WEIGHTS])
-                        for engine in all_resume_engines
-                    ]
-                )
 
     def gcr_suspend(self):
         """Suspend GPU memory via GCR across all groups (concurrent)."""
@@ -343,43 +295,6 @@ class RolloutServer:
         for g in self.server_groups:
             handles.extend(g.gcr_resume())
         return ray.get(handles) if handles else []
-
-    def offload(self):
-        """Release memory occupation across all groups (concurrent)."""
-        handles = []
-        for g in self.server_groups:
-            handles.extend(g.offload())
-        return ray.get(handles) if handles else []
-
-    def onload(self, tags: list[str] | None = None):
-        """Resume memory occupation across all groups (concurrent)."""
-        handles = []
-        for g in self.server_groups:
-            handles.extend(g.onload(tags))
-        return ray.get(handles) if handles else []
-
-    def onload_weights(self):
-        """Restore weights for offloaded groups.
-
-        All groups resume from CPU cache via ``resume_memory_occupation``.
-        For updatable servers, weights will be overwritten by
-        ``update_weights`` shortly after.  For non-updatable servers the
-        CPU backup already contains the correct (unchanged) weights.
-        """
-        handles = []
-        for g in self.server_groups:
-            if not g.needs_offload:
-                continue
-            handles.extend(g.onload(tags=[GPU_MEMORY_TYPE_WEIGHTS]))
-        return ray.get(handles) if handles else []
-
-    def onload_kv(self):
-        """Resume KV cache and CUDA graphs for offloaded groups."""
-        handles = []
-        for g in self.server_groups:
-            handles.extend(g.onload(tags=[GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_CUDA_GRAPH]))
-        return ray.get(handles) if handles else []
-
 
 @ray.remote
 class RolloutManager:
@@ -550,23 +465,6 @@ class RolloutManager:
     def gcr_resume(self):
         for srv in self.servers.values():
             srv.gcr_resume()
-
-    def offload(self):
-        self.health_monitoring_pause()
-        for srv in self.servers.values():
-            srv.offload()
-
-    def onload(self, tags: list[str] | None = None):
-        for srv in self.servers.values():
-            srv.onload(tags)
-
-    def onload_weights(self):
-        for srv in self.servers.values():
-            srv.onload_weights()
-
-    def onload_kv(self):
-        for srv in self.servers.values():
-            srv.onload_kv()
 
     def recover_updatable_engines(self):
         """Restart any dead rollout engines and update num_new_engines for update_weights detection.
@@ -1076,13 +974,13 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
             num_engines = group_cfg.num_gpus // num_gpu_per_engine_local
 
             group_abs_start = rollout_pg_offset + gpu_offset
-            needs_offload = args.offload_rollout and group_abs_start < megatron_num_gpus
+            needs_offload = getattr(args, "sglang_enable_gcr", False) or (
+                args.colocate and group_abs_start < megatron_num_gpus
+            )
             overrides = dict(group_cfg.overrides)
             if overrides_extra:
                 for k, v in overrides_extra.items():
                     overrides.setdefault(k, v)
-            if args.offload_rollout and not needs_offload:
-                overrides.setdefault("enable_memory_saver", False)
             logger.info(
                 f"Engine group '{group_cfg.worker_type}' gpu_offset={gpu_offset} "
                 f"(abs={group_abs_start}): needs_offload={needs_offload}"

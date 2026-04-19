@@ -382,19 +382,6 @@ class SGLangEngine(RayActor):
     def gcr_resume(self):
         return self._make_request("gcr_resume")
 
-    def release_memory_occupation(self):
-        self.flush_cache()
-        return self._make_request("release_memory_occupation")
-
-    def resume_memory_occupation(self, tags: list[str] = None):
-        """
-        Available tags for multi-stage resume: weights, kv_cache
-        """
-        return self._make_request(
-            "resume_memory_occupation",
-            {"tags": tags},
-        )
-
     def check_weights(self, action: str):
         return self._make_request("weights_checker", {"action": action})
 
@@ -549,7 +536,7 @@ def _compute_server_args(
         "trust_remote_code": True,
         "random_seed": args.seed + rank,
         # memory
-        "enable_memory_saver": args.offload_rollout,
+        "enable_gcr": getattr(args, "sglang_enable_gcr", args.colocate),
         # distributed
         "host": host,
         "port": port,

@@ -77,30 +77,14 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=False,
                 help=(
                     "Whether to colocate the inference engines and the actor. "
-                    "Turning this on will also set --offload to true."
+                    "When set, GCR is used to swap GPU memory between training and rollout."
                 ),
             )
             parser.add_argument(
-                "--offload",
-                action="store_true",
-                default=False,
-                help=("Equivalent to --offload-train + --offload-rollout. "),
-            )
-            parser.add_argument(
-                "--offload-train",
-                action=argparse.BooleanOptionalAction,
-                help=(
-                    "Whether to offload the training actor to CPU during training. "
-                    "This will always be true when --colocate is set."
-                ),
-            )
-            parser.add_argument(
-                "--offload-rollout",
-                action=argparse.BooleanOptionalAction,
-                help=(
-                    "Whether to offload the rollout generator to CPU during training. "
-                    "This will always be true when --colocate is set."
-                ),
+                "--gcr-timeout",
+                type=float,
+                default=120.0,
+                help="Timeout in seconds for GCR suspend/resume operations.",
             )
 
             reset_arg(parser, "--distributed-backend", type=str, default="nccl")
@@ -122,12 +106,6 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 type=json.loads,
                 default="{}",
                 help="Extra environment variables for training process, e.g. PyTorch memory management ones.",
-            )
-            parser.add_argument(
-                "--train-memory-margin-bytes",
-                type=int,
-                default=1024**3,
-                help="Add margin for train memory allocation. By default we will reserve 1GB as margin.",
             )
             parser.add_argument(
                 "--disable-weights-backuper",
@@ -1640,11 +1618,6 @@ def slime_validate_args(args):
     if args.critic_lr is None:
         args.critic_lr = args.lr
 
-    if args.offload:
-        args.offload_train = True
-        args.offload_rollout = True
-    del args.offload
-
     if args.debug_rollout_only:
         if args.colocate and (not args.rollout_num_gpus):
             args.rollout_num_gpus = args.actor_num_gpus_per_node * args.actor_num_nodes
@@ -1652,21 +1625,12 @@ def slime_validate_args(args):
             args.actor_num_gpus_per_node = min(8, args.rollout_num_gpus)
             args.actor_num_nodes = args.rollout_num_gpus // args.actor_num_gpus_per_node
         args.colocate = False
-        args.offload_train = args.offload_rollout = False
-        if args.train_memory_margin_bytes > 0:
-            logger.warning("Force train_memory_margin_bytes=0 since debug_rollout_only does not support it")
-            args.train_memory_margin_bytes = 0
 
     assert not (args.debug_rollout_only and args.debug_train_only), (
         "debug_rollout_only and debug_train_only cannot be set at the same time, " "please set only one of them."
     )
 
-    # always true on offload for colocate at the moment.
     if args.colocate:
-        if args.offload_train is None:
-            args.offload_train = True
-        if args.offload_rollout is None:
-            args.offload_rollout = True
         if args.rollout_num_gpus != args.actor_num_gpus_per_node * args.actor_num_nodes:
             logger.info(
                 f"rollout_num_gpus {args.rollout_num_gpus} != actor_num_gpus_per_node {args.actor_num_gpus_per_node} "
@@ -1675,11 +1639,6 @@ def slime_validate_args(args):
             args.rollout_num_gpus = args.actor_num_gpus_per_node * args.actor_num_nodes
             if args.use_critic:
                 args.rollout_num_gpus += args.critic_num_gpus_per_node * args.critic_num_nodes
-
-    if args.offload_train is None:
-        args.offload_train = False
-    if args.offload_rollout is None:
-        args.offload_rollout = False
 
     if args.eval_function_path is None:
         args.eval_function_path = args.rollout_function_path

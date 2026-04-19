@@ -1,3 +1,5 @@
+import os
+
 from slime.utils.misc import get_current_node_ip, get_free_port
 
 

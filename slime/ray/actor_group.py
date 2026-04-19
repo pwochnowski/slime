@@ -59,18 +59,15 @@ class RayTrainGroup:
             **self.args.train_env_vars,
         }
 
-        if self.args.offload_train and self.args.train_backend == "megatron":
-            import torch_memory_saver
-
-            dynlib_path = os.path.join(
-                os.path.dirname(os.path.dirname(torch_memory_saver.__file__)),
-                "torch_memory_saver_hook_mode_preload.abi3.so",
-            )
-            assert os.path.exists(dynlib_path), f"LD_PRELOAD so file {dynlib_path} does not exist."
-
-            env_vars["LD_PRELOAD"] = dynlib_path
-            env_vars["TMS_INIT_ENABLE"] = "1"
-            env_vars["TMS_INIT_ENABLE_CPU_BACKUP"] = "1"
+        if self.args.colocate:
+            gcr_home = os.environ.get("GCR_HOME")
+            if not gcr_home:
+                raise RuntimeError("--colocate requires GCR_HOME to be set")
+            gcr_preload = f"{gcr_home}/GCR/libpreload.so:{gcr_home}/GCR/libcuda.so"
+            for lib in gcr_preload.split(":"):
+                if not os.path.exists(lib):
+                    raise RuntimeError(f"GCR library not found: {lib}. Is GCR_HOME correct?")
+            env_vars["LD_PRELOAD"] = gcr_preload
 
         # We cannot do routing replay for critic.
         if self.args.use_routing_replay and self.role == "actor":
@@ -132,12 +129,6 @@ class RayTrainGroup:
     def gcr_resume(self):
         from slime.utils.gcr import resume
         resume(self._get_actor_pids())
-
-    def onload(self):
-        return ray.get([actor.wake_up.remote() for actor in self._actor_handlers])
-
-    def offload(self):
-        return ray.get([actor.sleep.remote() for actor in self._actor_handlers])
 
     def clear_memory(self):
         return ray.get([actor.clear_memory.remote() for actor in self._actor_handlers])

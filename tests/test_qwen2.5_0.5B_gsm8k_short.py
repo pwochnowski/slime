@@ -5,7 +5,7 @@ TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "1")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
-NUM_GPUS = 2
+NUM_GPUS = 1
 
 
 def prepare():
@@ -14,7 +14,11 @@ def prepare():
     # U.exec_command(f"huggingface-cli download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
     U.hf_download_dataset("zhuzilin/gsm8k")
     os.environ["RAY_SILENT_MODE"] = "1"
+    os.environ["GCR_HOME"] = "/root/GCR"
+    os.environ["GCR_PRELOAD_PATH"] = "/root/GCR/GCR/libpreload.so:/root/GCR/GCR/libcuda.so"
     os.environ["NCCL_CUMEM_ENABLE"] = "1"
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    os.environ["CUDA_AVAILABLE_DEVICES"] = "2"
 
 
 def execute():
@@ -77,9 +81,10 @@ def execute():
 
     sglang_args = (
         "--rollout-num-gpus-per-engine 1 "
-        f"--sglang-mem-fraction-static {0.5 if TIGHT_DEVICE_MEMORY else 0.7} "
-        f"--sglang-cuda-graph-max-bs {16 if TIGHT_DEVICE_MEMORY else 32} "
+        f"--sglang-mem-fraction-static {0.3 if TIGHT_DEVICE_MEMORY else 0.7} "
+        f"--sglang-cuda-graph-max-bs {8 if TIGHT_DEVICE_MEMORY else 32} "
         "--sglang-enable-metrics "
+        "--sglang-enable-gcr "
         "--log-level warning"
     )
 

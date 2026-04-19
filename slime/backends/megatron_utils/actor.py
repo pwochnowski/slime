@@ -3,7 +3,6 @@ import os
 import random
 import socket
 from argparse import Namespace
-from contextlib import nullcontext
 
 import numpy as np
 import ray
@@ -11,7 +10,6 @@ import torch
 import torch.distributed as dist
 from megatron.core import mpu
 from ray.actor import ActorHandle
-from torch_memory_saver import torch_memory_saver
 from transformers import AutoConfig, AutoTokenizer
 
 from slime.ray.train_actor import TrainRayActor
@@ -21,7 +19,6 @@ from slime.utils.distributed_utils import get_gloo_group, init_process_group
 from slime.utils.logging_utils import init_tracking
 from slime.utils.memory_utils import clear_memory, print_memory
 from slime.utils.misc import Box
-from slime.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
 from slime.utils.routing_replay import RoutingReplay
 from slime.utils.timer import Timer, inverse_timer, timer, with_defer
 from slime.utils.types import RolloutBatch
@@ -56,7 +53,6 @@ class MegatronTrainRayActor(TrainRayActor):
             self.args = args
             return 0
 
-        monkey_patch_torch_dist()
         super().init(args, role, with_ref, with_opd_teacher)
 
         init(args)
@@ -78,11 +74,6 @@ class MegatronTrainRayActor(TrainRayActor):
         }
         dist.barrier(group=get_gloo_group())
 
-        if args.offload_train:
-            if (x := args.train_memory_margin_bytes) > 0:
-                logger.info(f"Set torch_memory_saver.memory_margin_bytes to {x}")
-                torch_memory_saver.memory_margin_bytes = x
-
         if role == "critic":
             self.args.load = self.args.critic_load
             self.args.save = self.args.critic_save
@@ -96,8 +87,6 @@ class MegatronTrainRayActor(TrainRayActor):
         start_rollout_id = loaded_rollout_id + 1
 
         if role == "critic":
-            if self.args.offload_train:
-                self.sleep()
             return start_rollout_id
 
         self.weights_backuper = TensorBackuper.create(
@@ -105,7 +94,6 @@ class MegatronTrainRayActor(TrainRayActor):
                 self.args,
                 self.model,
                 convert_to_global_name=args.megatron_to_hf_mode == "raw",
-                translate_gpu_to_cpu=not self.args.enable_weights_backuper,
             ),
             single_tag=None if args.enable_weights_backuper else "actor",
         )
@@ -144,11 +132,6 @@ class MegatronTrainRayActor(TrainRayActor):
         # empty cache after initialization
         clear_memory()
 
-        if self.args.offload_train:
-            # recover to actor in the end.
-            self._switch_model("actor")
-            self.sleep()
-
         self.rollout_engines = None
 
         self.rollout_data_postprocess = None
@@ -160,29 +143,6 @@ class MegatronTrainRayActor(TrainRayActor):
         self.prof.on_init_end()
 
         return start_rollout_id
-
-    @timer
-    def sleep(self) -> None:
-        assert self.args.offload_train
-
-        clear_memory(clear_host_memory=True)
-        print_memory("before offload model")
-        destroy_process_groups()
-
-        torch_memory_saver.pause()
-
-        print_memory("after offload model")
-
-    @timer
-    def wake_up(self) -> None:
-        assert self.args.offload_train
-        print_memory("before wake_up model")
-
-        torch_memory_saver.resume()
-
-        clear_memory()
-        reload_process_groups()
-        print_memory("after wake_up model")
 
     def _get_rollout_data(self, rollout_data_ref: Box) -> RolloutBatch:
         # Fetch data through ray on CPU, not sure if this will be performance bottleneck.
@@ -364,9 +324,6 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.debug_rollout_only:
             return
 
-        if self.args.offload_train:
-            self.wake_up()
-
         with timer("data_preprocess"):
             rollout_data = self._get_rollout_data(rollout_data_ref)
 
@@ -517,10 +474,6 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.debug_rollout_only:
             return
 
-        # torch dist may trigger nccl communication during saving.
-        if self.args.offload_train:
-            reload_process_groups()
-
         if self.args.async_save:
             from megatron.training.async_utils import maybe_finalize_async_save
 
@@ -536,9 +489,6 @@ class MegatronTrainRayActor(TrainRayActor):
 
             save_hf_model(self.args, rollout_id, self.model)
 
-        if self.args.offload_train:
-            destroy_process_groups()
-
     @timer
     def update_weights(self) -> None:
         if self.args.debug_train_only or self.args.debug_rollout_only:
@@ -553,9 +503,6 @@ class MegatronTrainRayActor(TrainRayActor):
             self.rollout_manager.get_updatable_engines_and_lock.remote()
         )
 
-        if self.args.offload_train:
-            reload_process_groups()
-
         if num_new_engines > 0:
             self.weight_updater.connect_rollout_engines(
                 rollout_engines,
@@ -567,32 +514,28 @@ class MegatronTrainRayActor(TrainRayActor):
             if dist.get_rank() == 0:
                 ray.get(self.rollout_manager.clear_updatable_num_new_engines.remote())
 
-        with torch_memory_saver.disable() if self.args.offload_train else nullcontext():
-            print_memory("before update_weights")
-            self.weight_updater.update_weights()
-            print_memory("after update_weights")
+        print_memory("before update_weights")
+        self.weight_updater.update_weights()
+        print_memory("after update_weights")
 
-            if self.args.ci_test and len(rollout_engines) > 0:
-                engine = random.choice(rollout_engines)
-                engine_version = ray.get(engine.get_weight_version.remote())
-                if str(engine_version) != str(self.weight_updater.weight_version):
-                    raise RuntimeError(
-                        f"Weight version mismatch! Engine: {engine_version}, Updater: {self.weight_updater.weight_version}"
-                    )
+        if self.args.ci_test and len(rollout_engines) > 0:
+            engine = random.choice(rollout_engines)
+            engine_version = ray.get(engine.get_weight_version.remote())
+            if str(engine_version) != str(self.weight_updater.weight_version):
+                raise RuntimeError(
+                    f"Weight version mismatch! Engine: {engine_version}, Updater: {self.weight_updater.weight_version}"
+                )
 
-            if getattr(self.args, "keep_old_actor", False):
-                if self.args.update_weights_interval == 1:
-                    logger.info("updating model queue: rollout_actor -> old_actor, actor -> rollout_actor")
-                    # Queue-style update: rollout_actor params -> old_actor, actor params -> rollout_actor
-                    # First copy rollout_actor to old_actor
-                    self.weights_backuper.copy(src_tag="rollout_actor", dst_tag="old_actor")
-                    # Then copy current actor to rollout_actor
-                    self.weights_backuper.backup("rollout_actor")
-                else:
-                    self.weights_backuper.backup("old_actor")
-
-        if self.args.offload_train:
-            destroy_process_groups()
+        if getattr(self.args, "keep_old_actor", False):
+            if self.args.update_weights_interval == 1:
+                logger.info("updating model queue: rollout_actor -> old_actor, actor -> rollout_actor")
+                # Queue-style update: rollout_actor params -> old_actor, actor params -> rollout_actor
+                # First copy rollout_actor to old_actor
+                self.weights_backuper.copy(src_tag="rollout_actor", dst_tag="old_actor")
+                # Then copy current actor to rollout_actor
+                self.weights_backuper.backup("rollout_actor")
+            else:
+                self.weights_backuper.backup("old_actor")
 
     def load_other_checkpoint(self, model_tag: str, path: str) -> None:
         old_args = self.args.load, self.args.no_load_optim, self.args.no_load_rng, self.args.finetune

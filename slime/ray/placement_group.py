@@ -197,7 +197,4 @@ def create_rollout_manager(args, pg):
         ray.get(rollout_manager.check_weights.remote(action="snapshot"))
         ray.get(rollout_manager.check_weights.remote(action="reset_tensors"))
 
-    if args.offload_rollout:
-        ray.get(rollout_manager.offload.remote())
-
     return rollout_manager, num_rollout_per_epoch

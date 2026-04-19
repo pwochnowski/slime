@@ -107,14 +107,6 @@ class TrainRayActor(RayActor):
         gcr_resume_pids([os.getpid()])
 
     @abc.abstractmethod
-    def sleep(self, tags):
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def wake_up(self, tags):
-        raise NotImplementedError
-
-    @abc.abstractmethod
     def train(self, rollout_id, rollout_data_ref):
         raise NotImplementedError
 

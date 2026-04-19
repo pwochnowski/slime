@@ -45,8 +45,6 @@ def add_sglang_arguments(parser):
         "config",
         "trust_remote_code",
         "random_seed",
-        # memory
-        "enable_memory_saver",
         # distributed
         "tp_size",
         "port",
