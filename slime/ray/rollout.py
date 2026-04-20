@@ -889,7 +889,7 @@ def _start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool 
     # We will not use the health check from router.
     router_args.disable_health_check = True
 
-    logger.info(f"Launch router with args: {router_args}")
+    # logger.info(f"Launch router with args: {router_args}")
 
     process = multiprocessing.Process(
         target=run_router,
