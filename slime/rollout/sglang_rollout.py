@@ -418,7 +418,7 @@ async def generate_rollout_async(
     data = []
     all_data = []
     do_print = True
-    pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation")
+    pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation", disable=True)
     while len(data) < target_data_size:
         while state.remaining_batch_size < target_data_size:
             # get samples from the buffer and submit the generation requests.
@@ -569,7 +569,7 @@ async def eval_rollout_single_dataset(
 
     data = []
     do_print = True
-    pbar = tqdm(total=len(tasks), desc=f"Eval {dataset_cfg.name}", disable=not do_print)
+    pbar = tqdm(total=len(tasks), desc=f"Eval {dataset_cfg.name}", disable=True)
     for coro in asyncio.as_completed(tasks):
         sample = await coro
         if do_print:
