@@ -35,6 +35,7 @@ def train(args):
 
     # Enter Phase C (rollout): freeze MT, SG stays alive.
     if args.colocate:
+        actor_model.log_memory("before initial gcr_suspend")
         actor_model.gcr_suspend()
         if critic_model is not None:
             critic_model.gcr_suspend()
@@ -78,6 +79,8 @@ def train(args):
             actor_model.add_timer("phase_transition_to_train", time() - t0)
 
         # Phase A: train (MT alive, SG frozen)
+        if args.colocate:
+            actor_model.log_memory(f"iter {rollout_id} before train")
         if args.use_critic:
             critic_train_handle = critic_model.async_train(rollout_id, rollout_data_ref)
             if rollout_id >= args.num_critic_only_steps and not args.critic_train_only:
@@ -91,11 +94,14 @@ def train(args):
 
         # Phase A → B: thaw SG (MT stays alive)
         if args.colocate:
+            actor_model.log_memory(f"iter {rollout_id} after train")
             t0 = time()
             ray.get(rollout_manager.gcr_resume.remote())
             actor_model.add_timer("phase_transition_to_sync", time() - t0)
 
         # Phase B: update weights (both alive)
+        if args.colocate:
+            actor_model.log_memory(f"iter {rollout_id} before update_weights (phase B)")
         if not args.critic_train_only:
             actor_model.update_weights()
 

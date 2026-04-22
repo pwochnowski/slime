@@ -119,7 +119,7 @@ def log_gpu_memory(label: str = "") -> dict:
         f"[gpu-mem][rank {rank}] {label}: "
         f"alloc={alloc / 2**30:.2f}G  "
         f"reserved={reserved / 2**30:.2f}G  "
-        f"driver={device_used / 2**30:.2f}G  "
+        f"device={device_used / 2**30:.2f}G  "
         f"(gap={max(0, device_used - reserved) / 2**30:.2f}G  "
         f"free={free / 2**30:.2f}G)"
         f"{gcr_str}",

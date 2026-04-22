@@ -134,6 +134,9 @@ class RayTrainGroup:
         resume(self._get_actor_pids())
         self.log_memory("after gcr_resume")
 
+    def log_memory(self, label: str = ""):
+        ray.get([actor.log_memory.remote(label) for actor in self._actor_handlers])
+
     def clear_memory(self):
         return ray.get([actor.clear_memory.remote() for actor in self._actor_handlers])
 
