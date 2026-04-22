@@ -124,11 +124,15 @@ class RayTrainGroup:
 
     def gcr_suspend(self):
         from slime.utils.gcr import suspend
+        self.log_memory("before gcr_suspend")
         suspend(self._get_actor_pids())
+        self.log_memory("after gcr_suspend")
 
     def gcr_resume(self):
         from slime.utils.gcr import resume
+        self.log_memory("before gcr_resume")
         resume(self._get_actor_pids())
+        self.log_memory("after gcr_resume")
 
     def clear_memory(self):
         return ray.get([actor.clear_memory.remote() for actor in self._actor_handlers])
