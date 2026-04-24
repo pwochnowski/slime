@@ -18,7 +18,7 @@ import ray
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_PATH = f"/root/models/{MODEL_NAME}"
-NUM_GPUS = 1
+NUM_GPUS = 2
 BATCH_SIZE = 4
 
 
@@ -38,6 +38,9 @@ def setup(prompt_data_path):
     os.environ["PYTHONPATH"] = "/root/Megatron-LM/"
     # os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["NCCL_CUMEM_ENABLE"] = "1"
+    os.environ["NCCL_SHM_DISABLE"] = "1"
+    os.environ["NCCL_NET_DISABLE"] = "1"
+    os.environ["NCCL_IB_DISABLE"] = "1"
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
     os.environ["NCCL_NVLS_ENABLE"] = "0"
     os.environ["MASTER_ADDR"] = "127.0.0.1"
@@ -55,6 +58,9 @@ def setup(prompt_data_path):
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",
             "NCCL_NVLS_ENABLE": "0",
             "NCCL_CUMEM_ENABLE": "1",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_NET_DISABLE": "1",
+            "NCCL_IB_DISABLE": "1",
             "MASTER_ADDR": "127.0.0.1",
             "no_proxy": "127.0.0.1",
             "GCR_HOME": os.environ["GCR_HOME"],
@@ -93,7 +99,7 @@ def setup(prompt_data_path):
         "--global-batch-size", str(BATCH_SIZE),
         "--num-rollout", "2",
         # -- sglang --
-        "--rollout-num-gpus-per-engine", "1",
+        "--rollout-num-gpus-per-engine", str(NUM_GPUS),
         "--sglang-mem-fraction-static", "0.6",
         "--sglang-cuda-graph-max-bs", "16",
         "--sglang-enable-gcr", "true",
