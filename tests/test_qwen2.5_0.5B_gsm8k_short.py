@@ -5,7 +5,7 @@ TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "1")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
-NUM_GPUS = 1
+NUM_GPUS = 2
 
 
 def prepare():
@@ -17,6 +17,9 @@ def prepare():
     os.environ["GCR_HOME"] = "/root/GCR"
     os.environ["GCR_PRELOAD_PATH"] = "/root/GCR/GCR/libpreload.so:/root/GCR/GCR/libcuda.so"
     os.environ["NCCL_CUMEM_ENABLE"] = "1"
+    os.environ["NCCL_SHM_DISABLE"] = "1"
+    os.environ["NCCL_NET_DISABLE"] = "1"
+    os.environ["NCCL_IB_DISABLE"] = "1"
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     os.environ["CUDA_AVAILABLE_DEVICES"] = "2"
 
@@ -50,7 +53,7 @@ def execute():
     )
 
     perf_args = (
-        "--tensor-model-parallel-size 1 "
+        f"--tensor-model-parallel-size {NUM_GPUS} "
         "--sequence-parallel "
         "--pipeline-model-parallel-size 1 "
         "--context-parallel-size 1 "
@@ -80,7 +83,7 @@ def execute():
     )
 
     sglang_args = (
-        "--rollout-num-gpus-per-engine 1 "
+        f"--rollout-num-gpus-per-engine {NUM_GPUS} "
         f"--sglang-mem-fraction-static {0.3 if TIGHT_DEVICE_MEMORY else 0.7} "
         f"--sglang-cuda-graph-max-bs {8 if TIGHT_DEVICE_MEMORY else 32} "
         "--sglang-enable-metrics "

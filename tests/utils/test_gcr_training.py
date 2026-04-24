@@ -15,7 +15,7 @@ import ray
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_PATH = f"/root/models/{MODEL_NAME}"
-NUM_GPUS = 1
+NUM_GPUS = 2
 SEQ_LEN = 128
 BATCH_SIZE = 4
 
@@ -25,6 +25,9 @@ def setup():
     os.environ["PYTHONPATH"] = "/root/Megatron-LM/"
     os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["NCCL_CUMEM_ENABLE"] = "1"
+    os.environ["NCCL_SHM_DISABLE"] = "1"
+    os.environ["NCCL_NET_DISABLE"] = "1"
+    os.environ["NCCL_IB_DISABLE"] = "1"
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
     os.environ["NCCL_NVLS_ENABLE"] = "0"
     os.environ["MASTER_ADDR"] = "127.0.0.1"
@@ -36,6 +39,9 @@ def setup():
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",
             "NCCL_NVLS_ENABLE": "0",
             "NCCL_CUMEM_ENABLE": "1",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_NET_DISABLE": "1",
+            "NCCL_IB_DISABLE": "1",
             "MASTER_ADDR": "127.0.0.1",
             # "RAY_LD_PRELOAD_ON_WORKERS": "1",
             "no_proxy": "127.0.0.1",
@@ -80,7 +86,7 @@ def setup():
         "--use-dynamic-batch-size",
         "--max-tokens-per-gpu", "4096",
         # -- parallelism --
-        "--tensor-model-parallel-size", "1",
+        "--tensor-model-parallel-size", str(NUM_GPUS),
         "--sequence-parallel",
         "--pipeline-model-parallel-size", "1",
         "--context-parallel-size", "1",
