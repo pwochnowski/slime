@@ -124,6 +124,8 @@ class ServerGroup:
                     "SLIME_ENABLE_PROFILING": "true",
                 }.items()
             }
+            if (v := os.environ.get("SLIME_WAIT_FOR_GPU_IDS")):
+                env_vars["SLIME_WAIT_FOR_GPU_IDS"] = v
 
             rollout_engine = RolloutRayActor.options(
                 num_cpus=num_cpus,

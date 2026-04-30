@@ -128,6 +128,7 @@ def execute_train(
         exec_command(
             # will prevent ray from buffering stdout/stderr
             f"export PYTHONBUFFERED=16 && "
+            # f"export CUDA_VISIBLE_DEVICES=1,3 &&"
             f"ray start --head --node-ip-address {master_addr} --num-gpus {num_gpus_per_node} --disable-usage-stats"
         )
 
@@ -144,6 +145,11 @@ def execute_train(
                 # This is needed by megatron / torch distributed in multi-node setup
                 "MASTER_ADDR": master_addr,
                 **({"GCR_HOME": os.environ["GCR_HOME"]} if "GCR_HOME" in os.environ else {}),
+                **(
+                    {"SLIME_WAIT_FOR_GPU_IDS": os.environ["SLIME_WAIT_FOR_GPU_IDS"]}
+                    if "SLIME_WAIT_FOR_GPU_IDS" in os.environ
+                    else {}
+                ),
                 **(
                     {
                         "CUDA_ENABLE_COREDUMP_ON_EXCEPTION": "1",
