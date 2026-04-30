@@ -327,7 +327,7 @@ class MegatronTrainRayActor(TrainRayActor):
         log_gpu_memory(f"iter {rollout_id} train entry")
         with timer("data_preprocess"):
             rollout_data = self._get_rollout_data(rollout_data_ref)
-        torch.cuda.empty_cache()    
+        # torch.cuda.empty_cache()    
         log_gpu_memory(f"iter {rollout_id} after data_preprocess")
 
         if self.role == "critic":
@@ -383,7 +383,7 @@ class MegatronTrainRayActor(TrainRayActor):
                             store_prefix="ref_",
                         )
                     )
-                    torch.cuda.empty_cache()    
+                    # torch.cuda.empty_cache()    
                     log_gpu_memory(f"iter {rollout_id} after ref_log_probs")
 
                 # Forward teacher model to get teacher_log_probs for Megatron-based OPD
@@ -414,7 +414,7 @@ class MegatronTrainRayActor(TrainRayActor):
                             store_prefix="",
                         )
                     )
-                    torch.cuda.empty_cache()    
+                    # torch.cuda.empty_cache()    
                     log_gpu_memory(f"iter {rollout_id} after log_probs")
                     if self.args.use_rollout_routing_replay:
                         RoutingReplay.clear_all_forward()
