@@ -167,6 +167,12 @@ class UpdateWeightFromTensor:
         for hf_named_tensors in self._hf_weight_iterator.get_hf_weight_chunks(megatron_local_weights):
             refs, vmm_resources = self._send_hf_params(hf_named_tensors)
             ray.get(refs)
+            # Non-src ranks have refs=[], so ray.get() returns immediately, but
+            # they must not free the VMM buffer until the src rank's ray.get()
+            # has returned — which only happens after SGLang's tp_cpu_group
+            # barrier confirms all TP workers finished cuMemImportFromShareableHandle.
+            if self._ipc_gather_group is not None:
+                dist.barrier(group=self._ipc_gather_group)
             _cleanup_vmm_resources(vmm_resources)
             del hf_named_tensors
 
