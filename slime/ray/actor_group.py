@@ -58,6 +58,8 @@ class RayTrainGroup:
             **{name: "1" for name in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST},
             **self.args.train_env_vars,
         }
+        if (v := os.environ.get("SLIME_WAIT_FOR_GPU_IDS")):
+            env_vars["SLIME_WAIT_FOR_GPU_IDS"] = v
 
         if self.args.colocate:
             gcr_home = os.environ.get("GCR_HOME")

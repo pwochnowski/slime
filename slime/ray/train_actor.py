@@ -15,6 +15,7 @@ from gcr import resume as gcr_resume_pids, suspend as gcr_suspend_pids
 from slime.utils.logging_utils import configure_logger
 from slime.utils.memory_utils import clear_memory, log_gpu_memory, print_memory
 from slime.utils.timer import Timer
+from slime.utils.wait_for_gpu import wait_for_gpus_free
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,8 @@ class TrainRayActor(RayActor):
         self.with_opd_teacher = with_opd_teacher
 
         torch.serialization.add_safe_globals([slime.utils.eval_config.EvalDatasetConfig])
+
+        wait_for_gpus_free(label=f"train_actor rank={self._rank}")
 
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         torch.cuda.set_device(f"cuda:{local_rank}")

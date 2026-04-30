@@ -15,6 +15,7 @@ from urllib3.exceptions import NewConnectionError
 
 from slime.ray.ray_actor import RayActor
 from slime.utils.http_utils import get_host_info
+from slime.utils.wait_for_gpu import wait_for_gpus_free
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,7 @@ class SGLangEngine(RayActor):
         _sanity_check_server_args(actual_server_args, expect_server_args)
 
     def _init_normal(self, server_args_dict):
+        wait_for_gpus_free(label=f"sglang_engine rank={self.rank}")
         logger.info(f"Launch HttpServerEngineAdapter at: {self.server_host}:{self.server_port}")
         self.process = launch_server_process(ServerArgs(**server_args_dict))
 
