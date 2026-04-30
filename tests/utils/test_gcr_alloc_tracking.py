@@ -118,7 +118,7 @@ def main():
 
     # Phase 5: suspend and resume
     print("\n--- Suspend ---")
-    from slime.utils.gcr import suspend, resume
+    from gcr import suspend, resume
     suspend([os.getpid()])
     report("after suspend")
     print("--- Resume ---")
