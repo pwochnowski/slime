@@ -11,7 +11,7 @@ import torch.distributed as dist
 import slime.utils.eval_config
 from slime.ray.ray_actor import RayActor
 from slime.utils.distributed_utils import init_gloo_group
-from slime.utils.gcr import resume as gcr_resume_pids, suspend as gcr_suspend_pids
+from gcr import resume as gcr_resume_pids, suspend as gcr_suspend_pids
 from slime.utils.logging_utils import configure_logger
 from slime.utils.memory_utils import clear_memory, log_gpu_memory, print_memory
 from slime.utils.timer import Timer
