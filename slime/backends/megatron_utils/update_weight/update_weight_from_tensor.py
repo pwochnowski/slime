@@ -29,6 +29,22 @@ from .update_weight_from_distributed import (
     update_weights_from_distributed,
 )
 
+_CANARY_ENABLED = os.environ.get("SLIME_VMM_CANARY", "0") == "1"
+
+
+def _canary(label: str) -> None:
+    """Force a sync + trivial kernel to surface sticky CUDA errors at a known point.
+
+    Why: cudaErrorLaunchFailure (719) is sticky and surfaces on the *next* CUDA
+    op, which is often a NCCL collective with an unhelpful traceback. Inserting
+    canaries narrows the offending kernel to a region between two prints.
+    """
+    # if not _CANARY_ENABLED:
+    #     return
+    torch.cuda.synchronize()
+    torch.ones(1, device="cuda").sum().item()
+    print(f"[vmm-canary rank={dist.get_rank()}] {label}", flush=True)
+
 
 class UpdateWeightFromTensor:
     """
@@ -164,9 +180,14 @@ class UpdateWeightFromTensor:
 
         megatron_local_weights = self.weights_getter()
 
+        _canary("update_weights:before_chunk_loop")
+        chunk_idx = 0
         for hf_named_tensors in self._hf_weight_iterator.get_hf_weight_chunks(megatron_local_weights):
+            _canary(f"update_weights:chunk={chunk_idx}:after_iterator_yield")
             refs, vmm_resources = self._send_hf_params(hf_named_tensors)
+            _canary(f"update_weights:chunk={chunk_idx}:after_send_hf_params")
             ray.get(refs)
+            _canary(f"update_weights:chunk={chunk_idx}:after_ray_get")
             # Non-src ranks have refs=[], so ray.get() returns immediately, but
             # they must not free the VMM buffer until the src rank's ray.get()
             # has returned — which only happens after SGLang's tp_cpu_group
@@ -174,7 +195,9 @@ class UpdateWeightFromTensor:
             if self._ipc_gather_group is not None:
                 dist.barrier(group=self._ipc_gather_group)
             _cleanup_vmm_resources(vmm_resources)
+            _canary(f"update_weights:chunk={chunk_idx}:after_cleanup")
             del hf_named_tensors
+            chunk_idx += 1
 
         dist.barrier(group=get_gloo_group())
 
@@ -247,10 +270,15 @@ def _send_to_colocated_engine(
         total_bytes += flat.numel()
 
     # 2. Allocate VMM buffer and copy flattened data.
+    _canary("send_to_colocated:before_alloc_vmm")
     alloc = alloc_vmm_buffer(total_bytes, device)
+    _canary("send_to_colocated:after_alloc_vmm")
     buf = wrap_as_torch_uint8(alloc)
+    _canary("send_to_colocated:after_wrap_dlpack")
     torch.cat(flat_parts, out=buf[:total_bytes])
+    _canary("send_to_colocated:after_torch_cat")
     torch.cuda.synchronize(device)
+    _canary("send_to_colocated:after_sync")
     del flat_parts
 
     # 3. UDS listener -- serves the VMM fd to the SGLang consumer.
