@@ -38,13 +38,17 @@ def setup(prompt_data_path):
     os.environ["PYTHONPATH"] = "/root/Megatron-LM/"
     # os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["NCCL_CUMEM_ENABLE"] = "1"
-    os.environ["NCCL_SHM_DISABLE"] = "1"
+    # os.environ["NCCL_SHM_DISABLE"] = "1"
     os.environ["NCCL_NET_DISABLE"] = "1"
     os.environ["NCCL_IB_DISABLE"] = "1"
-    os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+    # os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
     os.environ["NCCL_NVLS_ENABLE"] = "0"
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["no_proxy"] = "127.0.0.1"
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+    # os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"   # already set
+    os.environ["NCCL_DEBUG"] = "INFO"                  # optional, helps localize NCCL-side faults
     os.environ.setdefault("GCR_HOME", "/root/GCR")
     gcr_home = os.environ["GCR_HOME"]
     os.environ.setdefault(
@@ -53,14 +57,22 @@ def setup(prompt_data_path):
     )
 
     ray.init(logging_level=1, runtime_env={
+        
         "env_vars": {
+            #  "CUDA_VISIBLE_DEVICES": "1,2",
+            "CUDA_VISIBLE_DEVICES": "2,3",
+            #  "CUDA_VISIBLE_DEVICES": "1,3",
             "PYTHONPATH": "/root/Megatron-LM/",
-            "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+            # "CUDA_DEVICE_MAX_CONNECTIONS": "1",
             "NCCL_NVLS_ENABLE": "0",
             "NCCL_CUMEM_ENABLE": "1",
-            "NCCL_SHM_DISABLE": "1",
+            # "NCCL_SHM_DISABLE": "1",
             "NCCL_NET_DISABLE": "1",
             "NCCL_IB_DISABLE": "1",
+            "CUDA_LAUNCH_BLOCKING": "1",
+            "TORCH_SHOW_CPP_STACKTRACES": "1",
+            # "CUDA_DEVICE_MAX_CONNECTIONS": "1",   # already set
+            "NCCL_DEBUG": "INFO",                  # optional, helps localize NCCL-side faults
             "MASTER_ADDR": "127.0.0.1",
             "no_proxy": "127.0.0.1",
             "GCR_HOME": os.environ["GCR_HOME"],
@@ -100,9 +112,13 @@ def setup(prompt_data_path):
         "--num-rollout", "2",
         # -- sglang --
         "--rollout-num-gpus-per-engine", str(NUM_GPUS),
+        "--rollout-max-response-len", str(8192),
         "--sglang-mem-fraction-static", "0.6",
         "--sglang-cuda-graph-max-bs", "16",
         "--sglang-enable-gcr", "true",
+        "--sglang-disable-cuda-graph", "true",
+        "--sglang-disable-custom-all-reduce", "true",
+        "--disable-custom-all-reduce", "true",
         # -- training args (needed by parser) --
         "--advantage-estimator", "grpo",
         "--eps-clip", "0.2",
