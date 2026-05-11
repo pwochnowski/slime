@@ -29,4 +29,5 @@ PROMPT='$(docker_prompt_info)'$PROMPT
 export CUDA_ROOT='/usr/local/cuda'
 export PATH="/root/GCR/GCR:$PATH"
 export GCR_HOME="/root/GCR"
+export FLASHINFER_DISABLE_VERSION_CHECK=1
 ZSHEOF
