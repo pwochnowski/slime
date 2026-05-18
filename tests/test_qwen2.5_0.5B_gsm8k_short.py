@@ -1,11 +1,36 @@
 import os
 import slime.utils.external_utils.command_utils as U
 
-TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "1")
+TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "0")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
 NUM_GPUS = 2
+
+# Forwarded to Ray train workers via execute_train(extra_env_vars=...).
+# Setting these in os.environ is a no-op for workers — the runtime-env-json
+# in command_utils.execute_train uses an explicit allowlist.
+WORKER_ENV_VARS = {
+    "NCCL_CUMEM_ENABLE": "1",
+    "NCCL_NET_DISABLE": "1",
+    "NCCL_IB_DISABLE": "1",
+    # "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+
+    # "TORCH_NCCL_BLOCKING_WAIT": "1",
+    # "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+
+    # "CUDA_DEVICE_WAITS_ON_EXCEPTION": "1",
+
+    # "CUDA_ENABLE_COREDUMP_ON_EXCEPTION": "1",
+    # "CUDA_COREDUMP_FILE":"/tmp/cuda-core.%p",
+    # "CUDA_COREDUMP_SHOW_PROGRESS":"1",
+
+    # "NCCL_DEBUG": "INFO",                         # add
+    # "NCCL_DEBUG_SUBSYS": "INIT,COLL",         # add
+    # "CUDA_LAUNCH_BLOCKING": "1",
+    "PYTORCH_ALLOC_CONF": "expandable_segments:False",
+    "PYTHONUNBUFFERED": "1",
+}
 
 
 def prepare():
@@ -14,7 +39,10 @@ def prepare():
     # U.exec_command(f"huggingface-cli download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
     U.hf_download_dataset("zhuzilin/gsm8k")
     os.environ["RAY_SILENT_MODE"] = "1"
-    os.environ["NCCL_CUMEM_ENABLE"] = "1"
+    os.environ["PYTHONUNBUFFERED"] = "1"
+    # os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
+    # os.environ["NCCL_DEBUG"] = "INFO"
+    # os.environ["CUDA_AVAILABLE_DEVICES"] = "2"
 
 
 def execute():
@@ -46,14 +74,14 @@ def execute():
     )
 
     perf_args = (
-        "--tensor-model-parallel-size 1 "
+        f"--tensor-model-parallel-size {min(NUM_GPUS, 2)} "
         "--sequence-parallel "
         "--pipeline-model-parallel-size 1 "
         "--context-parallel-size 1 "
         "--expert-model-parallel-size 1 "
         "--expert-tensor-parallel-size 1 "
         "--use-dynamic-batch-size "
-        f"--max-tokens-per-gpu {4096 if TIGHT_DEVICE_MEMORY else 9216}"
+        f"--max-tokens-per-gpu {4096 if TIGHT_DEVICE_MEMORY else 4096}"
     )
 
     grpo_args = (
@@ -76,11 +104,12 @@ def execute():
     )
 
     sglang_args = (
-        "--rollout-num-gpus-per-engine 1 "
-        f"--sglang-mem-fraction-static {0.5 if TIGHT_DEVICE_MEMORY else 0.7} "
-        f"--sglang-cuda-graph-max-bs {16 if TIGHT_DEVICE_MEMORY else 32} "
+        f"--rollout-num-gpus-per-engine {min(NUM_GPUS, 2)} "
+        f"--sglang-mem-fraction-static {0.7 if TIGHT_DEVICE_MEMORY else 0.85} "
+        f"--sglang-cuda-graph-max-bs {8 if TIGHT_DEVICE_MEMORY else 32} "
         "--sglang-enable-metrics "
-        "--log-level warning"
+        "--sglang-log-level warning "
+        "--sglang-disable-custom-all-reduce"
     )
 
     # ci_args = "--ci-test "
@@ -102,6 +131,7 @@ def execute():
         f"--actor-num-gpus-per-node {NUM_GPUS} "
         "--colocate "
         "--megatron-to-hf-mode bridge "
+        # "--check-weight-update-equal "
     )
 
     train_args = (
@@ -111,7 +141,7 @@ def execute():
         f"{grpo_args} "
         f"{U.get_default_wandb_args(__file__)} "
         f"{perf_args} "
-        f"{eval_args} "
+        # f"{eval_args} "
         f"{sglang_args} "
         # f"{ci_args} "
         # f"{fault_tolerance_args} "
@@ -122,6 +152,7 @@ def execute():
         train_args=train_args,
         num_gpus_per_node=NUM_GPUS,
         megatron_model_type=MODEL_TYPE,
+        extra_env_vars=WORKER_ENV_VARS,
     )
 
 
