@@ -418,31 +418,52 @@ async def generate_rollout_async(
     data = []
     all_data = []
     do_print = True
+    _filter_drop_count = 0
+    _total_groups_done = 0
+    _max_filter_drops = getattr(args, "max_dynamic_filter_drops", None) or target_data_size * 20
     pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation", disable=True)
+    logger.debug(f"[rollout-loop] rollout_id={rollout_id} starting, target_data_size={target_data_size}, pendings={len(state.pendings)}")
     while len(data) < target_data_size:
+        if _filter_drop_count >= _max_filter_drops:
+            logger.error(
+                f"[rollout-loop] rollout_id={rollout_id} hit max filter drops ({_max_filter_drops}). "
+                f"kept={len(data)}/{target_data_size}, total_groups={_total_groups_done}. "
+                f"Likely broken model weights after update. Aborting rollout loop."
+            )
+            break
         while state.remaining_batch_size < target_data_size:
             # get samples from the buffer and submit the generation requests.
             samples = data_source(args.over_sampling_batch_size)
             state.submit_generate_tasks(samples)
+            logger.debug(f"[rollout-loop] submitted batch, remaining_batch_size={state.remaining_batch_size}, pendings={len(state.pendings)}")
 
         # wait for the generation to finish
         done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             group: list[Sample] = task.result()
+            _total_groups_done += 1
 
             if do_print:
                 sample = group[0][0] if isinstance(group[0], list) else group[0]
-                # logger.info(
-                #     f"First rollout sample: {[str(sample.prompt) + sample.response]}, label: {str(sample.label)[:100]}, reward: {sample.reward}",
-                # )
+                logger.debug(
+                    f"[rollout-loop] first group done: reward={sample.reward}, response_len={len(sample.response)}, "
+                    f"truncated={getattr(sample, 'truncated', None)}"
+                )
                 do_print = False
 
             assert len(group) == args.n_samples_per_prompt
             all_data.append(group)
             dynamic_filter_output = call_dynamic_filter(dynamic_filter, args, group)
             if not dynamic_filter_output.keep:
+                _filter_drop_count += 1
                 metric_gatherer.on_dynamic_filter_drop(reason=dynamic_filter_output.reason)
                 state.remaining_batch_size -= 1
+                if _filter_drop_count % 5 == 0:
+                    logger.warning(
+                        f"[rollout-loop] rollout_id={rollout_id} filter dropped {_filter_drop_count}/{_total_groups_done} groups, "
+                        f"kept={len(data)}/{target_data_size}, reason={dynamic_filter_output.reason}, "
+                        f"pendings={len(state.pendings)}, remaining_batch_size={state.remaining_batch_size}"
+                    )
                 continue
 
             # add the samples to the data
