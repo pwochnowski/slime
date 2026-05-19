@@ -883,9 +883,11 @@ def _start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool 
 
     if has_pd_disaggregation:
         router_args.pd_disaggregation = True
-        # Disable circuit breaker to prevent RDMA transfer timeouts from
-        # marking decode workers as dead. Timeouts are transient (PCIe
-        # contention under high load) and do not indicate a dead server.
+
+    if has_pd_disaggregation or getattr(args, "colocate", False):
+        # Disable circuit breaker when engines undergo GCR suspend/resume
+        # cycles. Transient unresponsiveness during checkpoint/restore does
+        # not indicate a dead server.
         router_args.disable_circuit_breaker = True
 
     # We will not use the health check from router.
