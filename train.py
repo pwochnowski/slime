@@ -1,11 +1,26 @@
+import os
 from time import time
+
+os.environ.setdefault("RAY_memory_monitor_refresh_ms", "0")
 
 import ray
 
+from gcr import device_mem_get_info, _gpu_processes
 from slime.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
 from slime.utils.arguments import parse_args
 from slime.utils.logging_utils import configure_logger, finish_tracking, init_tracking, update_tracking_open_metrics
 from slime.utils.misc import should_run_periodic_action
+
+
+def log_phase_memory(label: str, num_devices: int):
+    G = 2**30
+    lines = [f"[phase-mem] {label}"]
+    for dev in range(num_devices):
+        free, total = device_mem_get_info(dev)
+        lines.append(f"  gpu {dev}: free={free / G:.2f}G total={total / G:.2f}G")
+    for proc in _gpu_processes():
+        lines.append(f"  {proc}")
+    print("\n".join(lines), flush=True)
 
 
 def train(args):
@@ -65,6 +80,9 @@ def train(args):
             ray.get(rollout_manager.eval.remote(rollout_id))
 
         # Phase C: generate (MT frozen, SG alive)
+        print(f"[driver] entering Phase C: generate(rollout_id={rollout_id})", flush=True)
+        if args.colocate:
+            log_phase_memory(f"start_of_rollout iter={rollout_id}", args.rollout_num_gpus)
         t0 = time()
         rollout_data_ref = ray.get(rollout_manager.generate.remote(rollout_id))
         actor_model.add_timer("rollout_generate", time() - t0)
@@ -72,7 +90,9 @@ def train(args):
         # Phase C → A: freeze SG, thaw MT
         if args.colocate:
             t0 = time()
+            print(f"[driver] phase C→A: triggering rollout gcr_suspend", flush=True)
             ray.get(rollout_manager.gcr_suspend.remote())
+            print(f"[driver] phase C→A: rollout gcr_suspend done ({time() - t0:.1f}s), restoring actor", flush=True)
             actor_model.gcr_resume()
             if critic_model is not None:
                 critic_model.gcr_resume()
@@ -80,6 +100,7 @@ def train(args):
 
         # Phase A: train (MT alive, SG frozen)
         if args.colocate:
+            log_phase_memory(f"start_of_train iter={rollout_id}", args.rollout_num_gpus)
             actor_model.log_memory(f"iter {rollout_id} before train")
         if args.use_critic:
             critic_train_handle = critic_model.async_train(rollout_id, rollout_data_ref)
@@ -103,15 +124,19 @@ def train(args):
         if args.colocate:
             actor_model.log_memory(f"iter {rollout_id} before update_weights (phase B)")
         if not args.critic_train_only:
+            print(f"[driver] Phase B: update_weights start (rollout_id={rollout_id})", flush=True)
             actor_model.update_weights()
+            print(f"[driver] Phase B: update_weights done (rollout_id={rollout_id})", flush=True)
 
         # Phase B → C: freeze MT
         if args.colocate:
+            print(f"[driver] Phase B→C: gcr_suspend start (rollout_id={rollout_id})", flush=True)
             t0 = time()
             actor_model.gcr_suspend()
             if critic_model is not None:
                 critic_model.gcr_suspend()
             actor_model.add_timer("phase_transition_to_rollout", time() - t0)
+            print(f"[driver] Phase B→C: gcr_suspend done (rollout_id={rollout_id})", flush=True)
         else:
             if args.critic_train_only:
                 critic_model.clear_memory()
