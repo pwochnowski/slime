@@ -286,6 +286,29 @@ class RolloutServer:
 
     def gcr_suspend(self):
         """Suspend GPU memory via GCR across all groups (concurrent)."""
+        # Drain in-flight CUDA work (especially NCCL collectives) so that
+        # schedulers are idle when SIGRTMAX arrives for checkpoint.
+        drain_handles = []
+        for g in self.server_groups:
+            if not g.needs_offload:
+                continue
+            for engine in g.engines:
+                if engine is not None:
+                    drain_handles.append(engine.pause_generation.remote())
+        if drain_handles:
+            t0 = time.time()
+            ray.get(drain_handles)
+            flush_handles = []
+            for g in self.server_groups:
+                if not g.needs_offload:
+                    continue
+                for engine in g.engines:
+                    if engine is not None:
+                        flush_handles.append(engine.flush_cache.remote())
+            if flush_handles:
+                ray.get(flush_handles)
+            logger.info("gcr_suspend: pause+flush took %.1fs", time.time() - t0)
+
         handles = []
         for g in self.server_groups:
             handles.extend(g.gcr_suspend())
@@ -296,7 +319,21 @@ class RolloutServer:
         handles = []
         for g in self.server_groups:
             handles.extend(g.gcr_resume())
-        return ray.get(handles) if handles else []
+        if handles:
+            ray.get(handles)
+        # Unpause schedulers that were paused in gcr_suspend drain step.
+        resume_handles = []
+        for g in self.server_groups:
+            if not g.needs_offload:
+                continue
+            for engine in g.engines:
+                if engine is not None:
+                    resume_handles.append(engine.continue_generation.remote())
+        if resume_handles:
+            t0 = time.time()
+            ray.get(resume_handles)
+            logger.info("gcr_resume: continue_generation took %.1fs", time.time() - t0)
+        return []
 
 @ray.remote
 class RolloutManager:
@@ -461,8 +498,11 @@ class RolloutManager:
 
     def gcr_suspend(self):
         self.health_monitoring_pause()
-        for srv in self.servers.values():
+        for name, srv in self.servers.items():
+            t0 = time.time()
+            logger.info("gcr_suspend: suspending server group '%s'", name)
             srv.gcr_suspend()
+            logger.info("gcr_suspend: server group '%s' done (%.1fs)", name, time.time() - t0)
 
     def gcr_resume(self):
         for srv in self.servers.values():
