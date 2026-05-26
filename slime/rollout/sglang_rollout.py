@@ -424,13 +424,13 @@ async def generate_rollout_async(
     pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation", disable=True)
     logger.debug(f"[rollout-loop] rollout_id={rollout_id} starting, target_data_size={target_data_size}, pendings={len(state.pendings)}")
     while len(data) < target_data_size:
-        if _filter_drop_count >= _max_filter_drops:
-            logger.error(
-                f"[rollout-loop] rollout_id={rollout_id} hit max filter drops ({_max_filter_drops}). "
-                f"kept={len(data)}/{target_data_size}, total_groups={_total_groups_done}. "
-                f"Likely broken model weights after update. Aborting rollout loop."
-            )
-            break
+        # if _filter_drop_count >= _max_filter_drops:
+        #     logger.error(
+        #         f"[rollout-loop] rollout_id={rollout_id} hit max filter drops ({_max_filter_drops}). "
+        #         f"kept={len(data)}/{target_data_size}, total_groups={_total_groups_done}. "
+        #         f"Likely broken model weights after update. Aborting rollout loop."
+        #     )
+        #     break
         while state.remaining_batch_size < target_data_size:
             # get samples from the buffer and submit the generation requests.
             samples = data_source(args.over_sampling_batch_size)
