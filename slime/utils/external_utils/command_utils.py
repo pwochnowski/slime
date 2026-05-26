@@ -128,7 +128,9 @@ def execute_train(
         exec_command(
             # will prevent ray from buffering stdout/stderr
             f"export PYTHONBUFFERED=16 && "
-            # f"export CUDA_VISIBLE_DEVICES=1,3 &&"
+            # Disable Ray memory monitor so GCR hugepage mmap is not rejected by cgroup limits
+            f"export RAY_memory_monitor_refresh_ms=0 && "
+            # f"export CUDA_VISIBLE_DEVICES=2,3 &&"
             f"ray start --head --node-ip-address {master_addr} --num-gpus {num_gpus_per_node} --disable-usage-stats"
         )
 
