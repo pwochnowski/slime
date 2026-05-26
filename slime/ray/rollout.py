@@ -19,6 +19,7 @@ from slime.backends.sglang_utils.sglang_engine import SGLangEngine
 from slime.rollout.base_types import call_rollout_fn
 from slime.utils import logging_utils
 from slime.utils.health_monitor import RolloutHealthMonitor
+from slime.utils.patch_libc10_cuda import create_patched_library, get_ld_preload_value
 from slime.utils.http_utils import _wrap_ipv6, find_available_port, get_host_info, init_http_client
 from slime.utils.logging_utils import configure_logger, init_tracking
 from slime.utils.metric_utils import compute_pass_rate, compute_rollout_step, compute_statistics, dict_add_prefix
@@ -90,6 +91,7 @@ class ServerGroup:
 
         RolloutRayActor = ray.remote(SGLangEngine)
 
+        patched_lib = create_patched_library()
         rollout_engines = []
         for i in range(len(self.all_engines)):
             if self.all_engines[i] is not None:
@@ -108,7 +110,6 @@ class ServerGroup:
                 placement_group_capture_child_tasks=True,
                 placement_group_bundle_index=reordered_bundle_indices[gpu_index],
             )
-
             env_vars = {name: "1" for name in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST} | {
                 key: os.environ.get(key, default_val)
                 for key, default_val in {
@@ -120,8 +121,10 @@ class ServerGroup:
                     "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_FALLBACK_VARIANT": "true",
                     "SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION": "false",
                     "SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE": "false",
-                    "GCR_PRELOAD_PATH": os.environ.get("GCR_PRELOAD_PATH", ""),
+                    "GCR_PRELOAD_PATH": f"{os.environ.get('GCR_PRELOAD_PATH', '')}:{patched_lib}",
                     "SLIME_ENABLE_PROFILING": "true",
+                    "PYTORCH_ALLOC_CONF":"expandable_segments:True",
+                    "LD_PRELOAD": get_ld_preload_value(patched_lib),
                 }.items()
             }
             if (v := os.environ.get("SLIME_WAIT_FOR_GPU_IDS")):
