@@ -1,7 +1,7 @@
 import os
 import slime.utils.external_utils.command_utils as U
 
-TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "1")
+TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "0")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
@@ -37,7 +37,7 @@ def prepare():
     U.exec_command("mkdir -p /root/models /root/datasets")
     U.exec_command(f"ln -sfn $(HF_HUB_OFFLINE=1 hf download Qwen/{MODEL_NAME}) /root/models/{MODEL_NAME}")
     # U.exec_command(f"huggingface-cli download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
-    # U.hf_download_dataset("zhuzilin/gsm8k")
+    U.hf_download_dataset("zhuzilin/gsm8k")
     os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["GCR_HOME"] = "/root/GCR"
     os.environ["GCR_PRELOAD_PATH"] = "/root/GCR/GCR/libpreload.so:/root/GCR/GCR/libcuda.so"
@@ -76,14 +76,14 @@ def execute():
     )
 
     perf_args = (
-        f"--tensor-model-parallel-size {NUM_GPUS} "
+        f"--tensor-model-parallel-size {min(NUM_GPUS, 2)} "
         "--sequence-parallel "
         "--pipeline-model-parallel-size 1 "
         "--context-parallel-size 1 "
         "--expert-model-parallel-size 1 "
         "--expert-tensor-parallel-size 1 "
         "--use-dynamic-batch-size "
-        f"--max-tokens-per-gpu {4096 if TIGHT_DEVICE_MEMORY else 9216}"
+        f"--max-tokens-per-gpu {4096 if TIGHT_DEVICE_MEMORY else 4096}"
     )
 
     grpo_args = (
@@ -106,8 +106,8 @@ def execute():
     )
 
     sglang_args = (
-        f"--rollout-num-gpus-per-engine {NUM_GPUS} "
-        f"--sglang-mem-fraction-static {0.3 if TIGHT_DEVICE_MEMORY else 0.7} "
+        f"--rollout-num-gpus-per-engine {min(NUM_GPUS, 2)} "
+        f"--sglang-mem-fraction-static {0.3 if TIGHT_DEVICE_MEMORY else 0.8} "
         f"--sglang-cuda-graph-max-bs {8 if TIGHT_DEVICE_MEMORY else 32} "
         "--sglang-enable-metrics "
         "--sglang-enable-gcr "

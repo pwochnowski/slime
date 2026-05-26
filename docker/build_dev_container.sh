@@ -3,11 +3,11 @@
 set -e
 
 # Pull the latest image
-docker pull slimerl/slime:latest
+# docker pull slimerl/slime:latest
 
 # Start the container
 docker run --rm --gpus all --privileged --ipc=host --name slime \
-    -v /data/:/root/.cache/huggingface \
+    -v /mnt/data/huggingface-cache:/root/.cache/huggingface \
     -v /home/paul/repos/GCR:/root/GCR \
     -v /home/paul/repos/slime:/root/slime \
     -v /home/paul/repos/Megatron-LM:/root/Megatron-LM \

@@ -13,3 +13,6 @@ cp -r /tmp/gcr_* "$LOG_DIR/"
 
 chmod +777 "$LOG_DIR"
 chmod +777 "$LOG_DIR"/*
+
+cp -r "$LOG_DIR" "../GCR/logs"
+chmod +777 "../GCR/$LOG_DIR"/*
