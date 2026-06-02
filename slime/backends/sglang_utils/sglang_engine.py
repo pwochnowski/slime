@@ -381,8 +381,14 @@ class SGLangEngine(RayActor):
     def gcr_suspend(self):
         return self._make_request("gcr_suspend")
 
-    def gcr_resume(self):
-        return self._make_request("gcr_resume")
+    def gcr_resume(self, tags: list[int] | None = None):
+        return self._make_request("gcr_resume", {"tags": tags} if tags else None)
+
+    def gcr_offload_tag(self, tags: list[int]):
+        return self._make_request("gcr_offload_tag", {"tags": tags})
+
+    def gcr_restore_tag(self, tags: list[int]):
+        return self._make_request("gcr_restore_tag", {"tags": tags})
 
     def check_weights(self, action: str):
         return self._make_request("weights_checker", {"action": action})

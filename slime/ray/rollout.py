@@ -188,7 +188,7 @@ class ServerGroup:
             return []
         return [engine.gcr_suspend.remote() for engine in self.engines if engine is not None]
 
-    def gcr_resume(self):
+    def gcr_resume(self, tags: list[int] | None = None):
         """Resume GPU memory on all engines via GCR (non-blocking).
 
         Returns a list of Ray ObjectRefs.  Skipped for groups that do not
@@ -196,7 +196,17 @@ class ServerGroup:
         """
         if not self.needs_offload:
             return []
-        return [engine.gcr_resume.remote() for engine in self.engines if engine is not None]
+        return [engine.gcr_resume.remote(tags) for engine in self.engines if engine is not None]
+
+    def gcr_offload_tag(self, tags: list[int]):
+        if not self.needs_offload:
+            return []
+        return [engine.gcr_offload_tag.remote(tags) for engine in self.engines if engine is not None]
+
+    def gcr_restore_tag(self, tags: list[int]):
+        if not self.needs_offload:
+            return []
+        return [engine.gcr_restore_tag.remote(tags) for engine in self.engines if engine is not None]
 
     def onload_weights_from_disk(self):
         """Reload weights from ``model_path`` for non-updatable groups."""
@@ -314,11 +324,11 @@ class RolloutServer:
             handles.extend(g.gcr_suspend())
         return ray.get(handles) if handles else []
 
-    def gcr_resume(self):
+    def gcr_resume(self, tags: list[int] | None = None):
         """Resume GPU memory via GCR across all groups (concurrent)."""
         handles = []
         for g in self.server_groups:
-            handles.extend(g.gcr_resume())
+            handles.extend(g.gcr_resume(tags))
         if handles:
             ray.get(handles)
         # Unpause schedulers that were paused in gcr_suspend drain step.
@@ -334,6 +344,20 @@ class RolloutServer:
             ray.get(resume_handles)
             logger.info("gcr_resume: continue_generation took %.1fs", time.time() - t0)
         return []
+
+    def gcr_offload_tag(self, tags: list[int]):
+        handles = []
+        for g in self.server_groups:
+            handles.extend(g.gcr_offload_tag(tags))
+        if handles:
+            ray.get(handles)
+
+    def gcr_restore_tag(self, tags: list[int]):
+        handles = []
+        for g in self.server_groups:
+            handles.extend(g.gcr_restore_tag(tags))
+        if handles:
+            ray.get(handles)
 
 @ray.remote
 class RolloutManager:
@@ -504,9 +528,17 @@ class RolloutManager:
             srv.gcr_suspend()
             logger.info("gcr_suspend: server group '%s' done (%.1fs)", name, time.time() - t0)
 
-    def gcr_resume(self):
+    def gcr_resume(self, tags: list[int] | None = None):
         for srv in self.servers.values():
-            srv.gcr_resume()
+            srv.gcr_resume(tags)
+
+    def gcr_offload_tag(self, tags: list[int]):
+        for srv in self.servers.values():
+            srv.gcr_offload_tag(tags)
+
+    def gcr_restore_tag(self, tags: list[int]):
+        for srv in self.servers.values():
+            srv.gcr_restore_tag(tags)
 
     def recover_updatable_engines(self):
         """Restart any dead rollout engines and update num_new_engines for update_weights detection.

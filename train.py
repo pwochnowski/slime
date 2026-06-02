@@ -23,6 +23,9 @@ def log_phase_memory(label: str, num_devices: int):
     print("\n".join(lines), flush=True)
 
 
+KV_CACHE_TAG = 1
+WEIGHTS_TAG = 2
+
 def train(args):
     configure_logger()
     # allocate the GPUs
@@ -36,6 +39,10 @@ def train(args):
     # Update primary W&B with SGLang metrics endpoint now that servers are up.
     router_addr = ray.get(rollout_manager.get_metrics_router_addr.remote())
     update_tracking_open_metrics(args, router_addr)
+
+    # Offload KV cache before Megatron allocates its param buffers.
+    if args.colocate:
+        ray.get(rollout_manager.gcr_offload_tag.remote([KV_CACHE_TAG]))
 
     # create the actor and critic models
     actor_model, critic_model = create_training_models(args, pgs, rollout_manager)
@@ -54,6 +61,7 @@ def train(args):
         actor_model.gcr_suspend()
         if critic_model is not None:
             critic_model.gcr_suspend()
+        ray.get(rollout_manager.gcr_restore_tag.remote([KV_CACHE_TAG]))
 
     # special case for eval-only
     if args.num_rollout == 0 and args.eval_interval is not None:
@@ -113,22 +121,21 @@ def train(args):
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             save(rollout_id)
 
-        # Phase A → B: thaw SG (MT stays alive)
+        # Phase A → B: thaw SG (MT stays alive), skip KV cache restore for weight sync
         if args.colocate:
             actor_model.log_memory(f"iter {rollout_id} after train")
             t0 = time()
-            ray.get(rollout_manager.gcr_resume.remote())
+            ray.get(rollout_manager.gcr_resume.remote([KV_CACHE_TAG]))
             actor_model.add_timer("phase_transition_to_sync", time() - t0)
 
-        # Phase B: update weights (both alive)
+        # Phase B: update weights (both alive, KV cache still offloaded)
         if args.colocate:
             actor_model.log_memory(f"iter {rollout_id} before update_weights (phase B)")
         if not args.critic_train_only:
             print(f"[driver] Phase B: update_weights start (rollout_id={rollout_id})", flush=True)
             actor_model.update_weights()
             print(f"[driver] Phase B: update_weights done (rollout_id={rollout_id})", flush=True)
-
-        # Phase B → C: freeze MT
+        # Phase B → C: freeze MT before restoring KV cache (KV cache is ~80% of GPU)
         if args.colocate:
             print(f"[driver] Phase B→C: gcr_suspend start (rollout_id={rollout_id})", flush=True)
             t0 = time()
@@ -137,6 +144,7 @@ def train(args):
                 critic_model.gcr_suspend()
             actor_model.add_timer("phase_transition_to_rollout", time() - t0)
             print(f"[driver] Phase B→C: gcr_suspend done (rollout_id={rollout_id})", flush=True)
+            ray.get(rollout_manager.gcr_restore_tag.remote([KV_CACHE_TAG]))
         else:
             if args.critic_train_only:
                 critic_model.clear_memory()
