@@ -13,7 +13,7 @@ from slime.ray.ray_actor import RayActor
 from slime.utils.distributed_utils import init_gloo_group
 from gcr import resume as gcr_resume_pids, suspend as gcr_suspend_pids
 from slime.utils.logging_utils import configure_logger
-from slime.utils.memory_utils import clear_memory, log_gpu_memory, print_memory
+from slime.utils.memory_utils import clear_memory, log_gpu_memory
 from slime.utils.timer import Timer
 from slime.utils.wait_for_gpu import wait_for_gpus_free
 
@@ -99,9 +99,7 @@ class TrainRayActor(RayActor):
     def clear_memory(self):
         if self.args.debug_rollout_only:
             return
-        print_memory("before TrainRayActor.clear_memory")
         clear_memory()
-        print_memory("after TrainRayActor.clear_memory")
 
     def gcr_suspend(self):
         log_gpu_memory("before gcr_suspend")

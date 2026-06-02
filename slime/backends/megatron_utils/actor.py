@@ -17,7 +17,7 @@ from slime.utils import train_dump_utils
 from slime.utils.data import process_rollout_data
 from slime.utils.distributed_utils import get_gloo_group, init_process_group
 from slime.utils.logging_utils import init_tracking
-from slime.utils.memory_utils import clear_memory, log_gpu_memory, print_memory
+from slime.utils.memory_utils import clear_memory, log_gpu_memory
 from slime.utils.misc import Box
 from slime.utils.routing_replay import RoutingReplay
 from slime.utils.timer import Timer, inverse_timer, timer, with_defer
@@ -526,9 +526,7 @@ class MegatronTrainRayActor(TrainRayActor):
             if dist.get_rank() == 0:
                 ray.get(self.rollout_manager.clear_updatable_num_new_engines.remote())
 
-        print_memory("before update_weights")
         self.weight_updater.update_weights()
-        print_memory("after update_weights")
 
         if self.args.ci_test and len(rollout_engines) > 0:
             engine = random.choice(rollout_engines)
