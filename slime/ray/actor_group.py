@@ -155,6 +155,9 @@ class RayTrainGroup:
     def log_memory(self, label: str = ""):
         ray.get([actor.log_memory.remote(label) for actor in self._actor_handlers])
 
+    def dump_segments(self, label: str = ""):
+        ray.get([actor.dump_segments.remote(label) for actor in self._actor_handlers])
+
     def init_optimizer_states(self):
         ray.get([actor.init_optimizer_states.remote() for actor in self._actor_handlers])
 
