@@ -18,7 +18,7 @@ from slime.utils.data import process_rollout_data
 from slime.utils.distributed_utils import get_gloo_group, init_process_group
 from slime.utils.logging_utils import init_tracking
 from gcr import ephemeral as gcr_ephemeral
-from slime.utils.memory_utils import clear_memory, log_gpu_memory
+from slime.utils.memory_utils import clear_memory, log_gpu_memory, print_train_mem
 from slime.utils.misc import Box
 from slime.utils.routing_replay import RoutingReplay
 from slime.utils.timer import Timer, inverse_timer, timer, with_defer
@@ -350,10 +350,12 @@ class MegatronTrainRayActor(TrainRayActor):
             return
 
         log_gpu_memory(f"iter {rollout_id} train entry")
+        print_train_mem(f"iter {rollout_id} train entry")
         with timer("data_preprocess"):
             rollout_data = self._get_rollout_data(rollout_data_ref)
         # torch.cuda.empty_cache()    
         log_gpu_memory(f"iter {rollout_id} after data_preprocess")
+        print_train_mem(f"iter {rollout_id} after data_preprocess")
 
         if self.role == "critic":
             return self.train_critic(rollout_id, rollout_data)
@@ -410,6 +412,7 @@ class MegatronTrainRayActor(TrainRayActor):
                     )
                     # torch.cuda.empty_cache()    
                     log_gpu_memory(f"iter {rollout_id} after ref_log_probs")
+                    print_train_mem(f"iter {rollout_id} after ref_log_probs")
 
                 # Forward teacher model to get teacher_log_probs for Megatron-based OPD
                 if "teacher" in self.weights_backuper.backup_tags:
@@ -424,6 +427,7 @@ class MegatronTrainRayActor(TrainRayActor):
                         )
                     )
                     log_gpu_memory(f"iter {rollout_id} after teacher_log_probs")
+                    print_train_mem(f"iter {rollout_id} after teacher_log_probs")
 
                 self._switch_model("old_actor" if self.args.keep_old_actor else "actor")
                 if not self.args.use_rollout_logprobs or self.args.get_mismatch_metrics:
@@ -441,6 +445,7 @@ class MegatronTrainRayActor(TrainRayActor):
                     )
                     # torch.cuda.empty_cache()    
                     log_gpu_memory(f"iter {rollout_id} after log_probs")
+                    print_train_mem(f"iter {rollout_id} after log_probs")
                     if self.args.use_rollout_routing_replay:
                         RoutingReplay.clear_all_forward()
 
@@ -470,6 +475,7 @@ class MegatronTrainRayActor(TrainRayActor):
             if self.args.use_routing_replay:
                 os.environ["ROUTING_REPLAY_STAGE"] = "replay_backward"
             log_gpu_memory(f"iter {rollout_id} before actor_train")
+            print_train_mem(f"iter {rollout_id} before actor_train")
             with timer("actor_train"):
                 train(
                     rollout_id,
@@ -481,6 +487,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 )
             torch.cuda.empty_cache()    
             log_gpu_memory(f"iter {rollout_id} after actor_train")
+            print_train_mem(f"iter {rollout_id} after actor_train")
 
 
             self.prof.step(rollout_id=rollout_id)

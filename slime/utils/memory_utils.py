@@ -41,6 +41,20 @@ def _byte_to_gb(n: int):
     return round(n / (1024**3), 2)
 
 
+def print_train_mem(label: str):
+    device = torch.cuda.current_device()
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    free, total = device_mem_get_info(device)
+    allocated = torch.cuda.memory_allocated(device)
+    reserved = torch.cuda.memory_reserved(device)
+    G = 2**30
+    print(
+        f"[train-mem rank={rank} gpu={device}] {label}: "
+        f"free={free / G:.2f}G alloc={allocated / G:.2f}G reserved={reserved / G:.2f}G total={total / G:.2f}G",
+        flush=True,
+    )
+
+
 def print_memory(msg, clear_before_print: bool = False):
     if clear_before_print:
         clear_memory()
