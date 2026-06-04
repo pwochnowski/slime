@@ -28,7 +28,7 @@ WORKER_ENV_VARS = {
     # "NCCL_DEBUG": "INFO",                         # add
     # "NCCL_DEBUG_SUBSYS": "INIT,COLL",         # add
     # "CUDA_LAUNCH_BLOCKING": "1",
-    "PYTORCH_ALLOC_CONF": "expandable_segments:False",
+    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
     "PYTHONUNBUFFERED": "1",
 }
 
