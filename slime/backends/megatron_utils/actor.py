@@ -476,6 +476,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 os.environ["ROUTING_REPLAY_STAGE"] = "replay_backward"
             log_gpu_memory(f"iter {rollout_id} before actor_train")
             print_train_mem(f"iter {rollout_id} before actor_train")
+            torch.cuda.empty_cache()
             with timer("actor_train"):
                 train(
                     rollout_id,
