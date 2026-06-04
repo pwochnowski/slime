@@ -17,6 +17,7 @@ from slime.utils import train_dump_utils
 from slime.utils.data import process_rollout_data
 from slime.utils.distributed_utils import get_gloo_group, init_process_group
 from slime.utils.logging_utils import init_tracking
+from gcr import ephemeral as gcr_ephemeral
 from slime.utils.memory_utils import clear_memory, log_gpu_memory
 from slime.utils.misc import Box
 from slime.utils.routing_replay import RoutingReplay
@@ -80,9 +81,16 @@ class MegatronTrainRayActor(TrainRayActor):
             self.args.lr = self.args.critic_lr
             self.args.lr_warmup_iters = self.args.critic_lr_warmup_iters
 
-        (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
-            args, role
-        )
+        import gcr
+        MT_MODEL_TAG= 3
+        # Isolate model+optimizer tensors in their own CUDA memory pool so that
+        # after gcr_offload_tag unmaps these segments, the default pool's free
+        # list never includes the now-dead headroom from the Megatron segments.
+        self._mt_mem_pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(self._mt_mem_pool), gcr.tagged(tag=MT_MODEL_TAG):
+            (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
+                args, role
+            )
 
         start_rollout_id = loaded_rollout_id + 1
 
@@ -143,6 +151,23 @@ class MegatronTrainRayActor(TrainRayActor):
         self.prof.on_init_end()
 
         return start_rollout_id
+
+    def init_optimizer_states(self):
+        """Eagerly allocate Adam optimizer states under GCR tag 4 (MT_OPTIM_TAG).
+
+        Must be called when sglang is off-GPU (e.g. after gcr_suspend in C→A)
+        so there is enough VRAM for the exp_avg / exp_avg_sq tensors.
+        """
+        import gcr
+        MT_OPTIM_TAG = 4
+        with torch.cuda.use_mem_pool(self._mt_mem_pool), gcr.tagged(tag=MT_OPTIM_TAG):
+            inner_opt = self.optimizer.optimizer
+            for group in inner_opt.param_groups:
+                for p in group['params']:
+                    if len(inner_opt.state[p]) == 0:
+                        inner_opt.state[p]['step'] = torch.tensor(0.0)
+                        inner_opt.state[p]['exp_avg'] = torch.zeros_like(p.data)
+                        inner_opt.state[p]['exp_avg_sq'] = torch.zeros_like(p.data)
 
     def _get_rollout_data(self, rollout_data_ref: Box) -> RolloutBatch:
         # Fetch data through ray on CPU, not sure if this will be performance bottleneck.

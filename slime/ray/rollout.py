@@ -345,6 +345,18 @@ class RolloutServer:
             logger.info("gcr_resume: continue_generation took %.1fs", time.time() - t0)
         return []
 
+    def flush_engines_cache(self):
+        """Flush KV cache on all engines that participate in GCR offload."""
+        handles = []
+        for g in self.server_groups:
+            if not g.needs_offload:
+                continue
+            for engine in g.engines:
+                if engine is not None:
+                    handles.append(engine.flush_cache.remote())
+        if handles:
+            ray.get(handles)
+
     def gcr_offload_tag(self, tags: list[int]):
         handles = []
         for g in self.server_groups:
@@ -539,6 +551,10 @@ class RolloutManager:
     def gcr_restore_tag(self, tags: list[int]):
         for srv in self.servers.values():
             srv.gcr_restore_tag(tags)
+
+    def flush_engines_cache(self):
+        for srv in self.servers.values():
+            srv.flush_engines_cache()
 
     def recover_updatable_engines(self):
         """Restart any dead rollout engines and update num_new_engines for update_weights detection.

@@ -136,8 +136,27 @@ class RayTrainGroup:
         resume(self._get_actor_pids())
         self.log_memory("after gcr_resume")
 
+    def gcr_offload_tag(self, tags):
+        import sys
+        from gcr import offload_tag
+        pids = self._get_actor_pids()
+        print(f"[OFFLOAD-TRACE][slime/actor_group] gcr_offload_tag entry tags={tags} pids={pids}", file=sys.stderr, flush=True)
+        self.log_memory(f"before gcr_offload_tag {tags}")
+        offload_tag(pids, tags)
+        self.log_memory(f"after gcr_offload_tag {tags}")
+        print(f"[OFFLOAD-TRACE][slime/actor_group] gcr_offload_tag exit tags={tags}", file=sys.stderr, flush=True)
+
+    def gcr_restore_tag(self, tags):
+        from gcr import restore_tag
+        self.log_memory(f"before gcr_restore_tag {tags}")
+        restore_tag(self._get_actor_pids(), tags)
+        self.log_memory(f"after gcr_restore_tag {tags}")
+
     def log_memory(self, label: str = ""):
         ray.get([actor.log_memory.remote(label) for actor in self._actor_handlers])
+
+    def init_optimizer_states(self):
+        ray.get([actor.init_optimizer_states.remote() for actor in self._actor_handlers])
 
     def clear_memory(self):
         return ray.get([actor.clear_memory.remote() for actor in self._actor_handlers])
