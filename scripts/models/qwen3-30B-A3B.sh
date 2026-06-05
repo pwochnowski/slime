@@ -31,6 +31,7 @@ MODEL_ARGS=(
    --swiglu
    --untie-embeddings-and-output-weights
    --vocab-size 151936
+   --make-vocab-size-divisible-by 1
 
    --rotary-base "${MODEL_ARGS_ROTARY_BASE:-1000000}"
 
@@ -44,6 +45,6 @@ MODEL_ARGS=(
    --moe-grouped-gemm
    --moe-token-drop-policy probs
    --moe-router-dtype fp32
-   --moe-permute-fusion
+   # --moe-permute-fusion
    --moe-aux-loss-coeff 0
 )
