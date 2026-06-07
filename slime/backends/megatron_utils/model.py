@@ -236,6 +236,16 @@ def forward_only(
             forward_kwargs.update(batch["multimodal_train_inputs"])
         output_tensor = model(**forward_kwargs)
 
+        if torch.isnan(output_tensor).any():
+            rank = mpu.get_tensor_model_parallel_rank()
+            nan_count = torch.isnan(output_tensor).sum().item()
+            total = output_tensor.numel()
+            logger.warning(
+                "[rank %d] NaN in model output logits: %d/%d elements, shape=%s, absmax=%s",
+                rank, nan_count, total, list(output_tensor.shape),
+                output_tensor[~torch.isnan(output_tensor)].abs().max().item() if nan_count < total else "all-NaN",
+            )
+
         return output_tensor, partial(
             f,
             args=args,
