@@ -41,6 +41,37 @@ logging.getLogger("megatron").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+def _check_model_weights(model, label=""):
+    """Diagnostic: check all model parameters for NaN/Inf after checkpoint loading."""
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    nan_params = []
+    inf_params = []
+    zero_params = []
+    expert_stats = []
+    for name, param in model[0].named_parameters():
+        if torch.isnan(param.data).any():
+            nan_params.append(name)
+        if torch.isinf(param.data).any():
+            inf_params.append(name)
+        if param.data.numel() > 0 and param.data.abs().max().item() == 0:
+            zero_params.append(name)
+        if "expert" in name and "weight" in name and len(expert_stats) < 6:
+            expert_stats.append(
+                f"  {name}: shape={list(param.shape)}, norm={param.data.float().norm().item():.4f}, "
+                f"absmax={param.data.abs().max().item():.4f}"
+            )
+    if nan_params:
+        logger.warning("[rank %d] %s: NaN in parameters: %s", rank, label, nan_params[:10])
+    if inf_params:
+        logger.warning("[rank %d] %s: Inf in parameters: %s", rank, label, inf_params[:10])
+    if zero_params:
+        logger.warning("[rank %d] %s: All-zero parameters (%d): %s", rank, label, len(zero_params), zero_params[:10])
+    if not nan_params and not inf_params:
+        logger.info("[rank %d] %s: All parameters finite (no NaN/Inf). %d all-zero params.", rank, label, len(zero_params))
+    if expert_stats:
+        logger.info("[rank %d] %s: Expert weight stats:\n%s", rank, label, "\n".join(expert_stats))
+
+
 class MegatronTrainRayActor(TrainRayActor):
     @with_defer(lambda: Timer().start("train_wait"))
     def init(
@@ -93,6 +124,7 @@ class MegatronTrainRayActor(TrainRayActor):
             )
 
         start_rollout_id = loaded_rollout_id + 1
+        _check_model_weights(self.model, label="after actor checkpoint load")
 
         if role == "critic":
             return start_rollout_id
@@ -110,6 +142,7 @@ class MegatronTrainRayActor(TrainRayActor):
 
         if with_ref:
             self.load_other_checkpoint("ref", args.ref_load)
+            _check_model_weights(self.model, label="after ref checkpoint load")
 
         # Load teacher model for Megatron-based on-policy distillation
         if with_opd_teacher:
