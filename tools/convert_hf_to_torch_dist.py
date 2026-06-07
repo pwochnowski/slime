@@ -52,8 +52,8 @@ def get_args():
     def ceildiv(a, b):
         return -(a // -b)
 
-    if args.pipeline_model_parallel_size == 1 and world_size > 1:
-        pp_size = world_size
+    if args.pipeline_model_parallel_size == 1 and world_size > args.tensor_model_parallel_size:
+        pp_size = world_size // args.tensor_model_parallel_size
         while True:
             args.pipeline_model_parallel_size = pp_size
             args.decoder_last_pipeline_num_layers = args.num_layers - ceildiv(

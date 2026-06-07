@@ -22,6 +22,7 @@ def convert_checkpoint(
     model_name,
     megatron_model_type,
     num_gpus_per_node: int,
+    tensor_model_parallel_size: int = 1,
     multinode: bool = False,
     extra_args: str = "",
     dir_dst: str = "/root",
@@ -29,6 +30,8 @@ def convert_checkpoint(
 ):
     hf_checkpoint = hf_checkpoint or f"/root/models/{model_name}"
     normalized_extra_args = f" {extra_args.strip()}" if extra_args.strip() else ""
+    if tensor_model_parallel_size > 1:
+        normalized_extra_args += f" --tensor-model-parallel-size {tensor_model_parallel_size}"
 
     # TODO shall we make it in host-mapped folder and thus can cache it to speedup CI
     path_dst = f"{dir_dst}/{model_name}_torch_dist"
@@ -52,7 +55,7 @@ def convert_checkpoint(
 
     exec_command(
         f"source {repo_base_dir}/scripts/models/{megatron_model_type}.sh && "
-        f"PYTHONPATH=/root/Megatron-LM "
+        f"{'CUDA_DEVICE_MAX_CONNECTIONS=1 ' if tensor_model_parallel_size > 1 else ''}PYTHONPATH=/root/Megatron-LM "
         f"torchrun "
         f"--nproc-per-node {num_gpus_per_node} "
         f"{multinode_args}"
