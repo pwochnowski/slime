@@ -3,6 +3,7 @@ import gc
 import logging
 import math
 import os
+import time
 from argparse import Namespace
 from collections.abc import Callable, Sequence
 from functools import partial
@@ -262,6 +263,11 @@ def forward_only(
     forward_data_store = []
     num_steps_per_rollout = len(num_microbatches)
     for step_id in range(num_steps_per_rollout):
+        _seg_before = torch.cuda.memory_stats().get("segment.all.allocated", 0)
+        _gpu_s = torch.cuda.Event(enable_timing=True)
+        _gpu_e = torch.cuda.Event(enable_timing=True)
+        _gpu_s.record()
+        t_step_start = time.time()
         forward_data_store += forward_backward_func(
             forward_step_func=forward_step,
             data_iterator=data_iterator,
@@ -271,6 +277,29 @@ def forward_only(
             micro_batch_size=args.micro_batch_size,
             forward_only=True,
         )
+        _gpu_e.record()
+        torch.cuda.synchronize()
+        t_step_end = time.time()
+        try:
+            mem = torch.cuda.memory_stats()
+            gpu_id = torch.cuda.current_device()
+            free, total = torch.cuda.mem_get_info(gpu_id)
+            _seg_after = mem.get("segment.all.allocated", 0)
+            _gpu_ms = _gpu_s.elapsed_time(_gpu_e)
+            logger.info(
+                f"[fwd-only] {store_prefix}step {step_id}/{num_steps_per_rollout}: "
+                f"wall={t_step_end - t_step_start:.2f}s "
+                f"gpu={_gpu_ms / 1000:.2f}s "
+                f"cpu_overhead={t_step_end - t_step_start - _gpu_ms / 1000:.2f}s "
+                f"n_micro={num_microbatches[step_id]} "
+                f"new_seg_allocs={_seg_after - _seg_before} "
+                f"alloc={mem.get('allocated_bytes.all.current', 0) / 1e9:.2f}GB "
+                f"reserved={mem.get('reserved_bytes.all.current', 0) / 1e9:.2f}GB "
+                f"free_cuda={free / 1e9:.2f}GB "
+                f"retries={mem.get('num_alloc_retries', 0)}"
+            )
+        except Exception:
+            pass
 
     # Move model back to the train mode.
     for model_module in model:
@@ -420,6 +449,64 @@ def train_one_step(
 
     # Forward pass.
     forward_backward_func = get_forward_backward_func()
+
+    def _cuda_alloc_retries():
+        try:
+            return torch.cuda.memory_stats().get("num_alloc_retries", 0)
+        except Exception:
+            return 0
+
+    def _log_mem_snapshot(label):
+        try:
+            mem = torch.cuda.memory_stats()
+            gpu_id = torch.cuda.current_device()
+            free, total = torch.cuda.mem_get_info(gpu_id)
+            logger.info(
+                f"[mem-snapshot] {label} gpu={gpu_id}: "
+                f"allocated={mem.get('allocated_bytes.all.current', 0) / 1e9:.2f}GB "
+                f"peak_alloc={mem.get('allocated_bytes.all.peak', 0) / 1e9:.2f}GB "
+                f"reserved={mem.get('reserved_bytes.all.current', 0) / 1e9:.2f}GB "
+                f"free_cuda={free / 1e9:.2f}GB "
+                f"inactive_split={mem.get('inactive_split_bytes.all.current', 0) / 1e9:.2f}GB "
+                f"alloc_retries={mem.get('num_alloc_retries', 0)} "
+                f"ooms={mem.get('num_ooms', 0)} "
+                f"segments={mem.get('segment.all.current', 0)} "
+                f"seg_allocs_total={mem.get('segment.all.allocated', 0)}"
+            )
+        except Exception as e:
+            logger.warning(f"[mem-snapshot] {label} failed: {e}")
+
+    retries_before = _cuda_alloc_retries()
+    torch.cuda.reset_peak_memory_stats()
+    _log_mem_snapshot(f"step_{step_id}_before_fwbw")
+
+    # Probe: time a single allocation+free to measure cudaMalloc latency
+    try:
+        for probe_size_mb in [2, 32, 128]:
+            torch.cuda.synchronize()
+            _t0 = time.time()
+            _probe = torch.empty(probe_size_mb * 1024 * 1024 // 4, device='cuda', dtype=torch.float32)
+            torch.cuda.synchronize()
+            _t1 = time.time()
+            del _probe
+            torch.cuda.synchronize()
+            _t2 = time.time()
+            mem = torch.cuda.memory_stats()
+            logger.info(
+                f"[alloc-probe] step_{step_id} {probe_size_mb}MB: "
+                f"alloc={_t1 - _t0:.4f}s free={_t2 - _t1:.4f}s "
+                f"seg_allocs={mem.get('segment.all.allocated', 0)}"
+            )
+    except Exception:
+        pass
+
+    # Measure GPU vs CPU time to distinguish compute slowdown from allocation stalls
+    _seg_allocs_before_fwbw = torch.cuda.memory_stats().get("segment.all.allocated", 0)
+    _gpu_start = torch.cuda.Event(enable_timing=True)
+    _gpu_end = torch.cuda.Event(enable_timing=True)
+    _gpu_start.record()
+    t_fwbw_start = time.time()
+
     losses_reduced = forward_backward_func(
         forward_step_func=forward_step,
         data_iterator=data_iterator,
@@ -430,6 +517,24 @@ def train_one_step(
         decoder_seq_length=args.decoder_seq_length,
         forward_only=False,
     )
+
+    _gpu_end.record()
+    torch.cuda.synchronize()
+    t_fwbw_end = time.time()
+    _seg_allocs_after_fwbw = torch.cuda.memory_stats().get("segment.all.allocated", 0)
+    try:
+        _gpu_ms = _gpu_start.elapsed_time(_gpu_end)
+        logger.info(
+            f"[fwbw-timing] step_{step_id}: "
+            f"wall={t_fwbw_end - t_fwbw_start:.1f}s "
+            f"gpu={_gpu_ms / 1000:.1f}s "
+            f"cpu_overhead={t_fwbw_end - t_fwbw_start - _gpu_ms / 1000:.1f}s "
+            f"new_seg_allocs={_seg_allocs_after_fwbw - _seg_allocs_before_fwbw}"
+        )
+    except Exception:
+        pass
+    retries_after_fwbw = _cuda_alloc_retries()
+    _log_mem_snapshot(f"step_{step_id}_after_fwbw")
 
     valid_step = True
     grad_norm = float("nan")
@@ -451,6 +556,7 @@ def train_one_step(
 
         check_mtp_only_grad(model, step_id)
 
+    t_opt_start = time.time()
     if valid_step:
         # Update parameters.
         update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
@@ -458,6 +564,30 @@ def train_one_step(
         # Update learning rate.
         assert update_successful
         opt_param_scheduler.step(increment=args.global_batch_size)
+
+    torch.cuda.synchronize()
+    t_opt_end = time.time()
+    retries_after_opt = _cuda_alloc_retries()
+
+    mem = torch.cuda.memory_stats()
+    gpu_id = torch.cuda.current_device()
+    free_cuda, total_cuda = torch.cuda.mem_get_info(gpu_id)
+    logger.info(
+        f"[perf-debug] gpu={gpu_id} step {step_id}: "
+        f"fwd_bwd={t_fwbw_end - t_fwbw_start:.1f}s "
+        f"opt={t_opt_end - t_opt_start:.1f}s "
+        f"alloc_retries_fwbw={retries_after_fwbw - retries_before} "
+        f"alloc_retries_opt={retries_after_opt - retries_after_fwbw} "
+        f"peak={mem.get('allocated_bytes.all.peak', 0) / 1e9:.2f}GB "
+        f"reserved={mem.get('reserved_bytes.all.current', 0) / 1e9:.2f}GB "
+        f"free_cuda={free_cuda / 1e9:.2f}GB "
+        f"inactive_split={mem.get('inactive_split_bytes.all.current', 0) / 1e9:.2f}GB "
+        f"segments={mem.get('segment.all.current', 0)} "
+        f"seg_allocs_total={mem.get('segment.all.allocated', 0)} "
+        f"large_pool_active={mem.get('active_bytes.large_pool.current', 0) / 1e9:.2f}GB "
+        f"large_pool_reserved={mem.get('reserved_bytes.large_pool.current', 0) / 1e9:.2f}GB "
+        f"small_pool_reserved={mem.get('reserved_bytes.small_pool.current', 0) / 1e9:.2f}GB"
+    )
 
     # release grad
     for model_chunk in model:
