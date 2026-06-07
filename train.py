@@ -6,7 +6,7 @@ from slime.ray.placement_group import create_placement_groups, create_rollout_ma
 from slime.utils.arguments import parse_args
 from slime.utils.logging_utils import configure_logger, finish_tracking, init_tracking, update_tracking_open_metrics
 from slime.utils.misc import should_run_periodic_action
-
+from slime.utils.mem_utils import log_phase_memory
 
 def train(args):
     configure_logger()
@@ -76,15 +76,18 @@ def train(args):
         if args.eval_interval is not None and rollout_id == 0 and not args.skip_eval_before_train:
             ray.get(rollout_manager.eval.remote(rollout_id))
 
+        log_phase_memory(f"start_of_rollout iter={rollout_id}", args.rollout_num_gpus)
         t0 = time()
         rollout_data_ref = ray.get(rollout_manager.generate.remote(rollout_id))
         actor_model.add_timer("rollout_generate", time() - t0)
+        log_phase_memory(f"end_of_rollout iter={rollout_id}", args.rollout_num_gpus)
 
         if args.offload_rollout:
             t0 = time()
             ray.get(rollout_manager.offload.remote())
             actor_model.add_timer("rollout_offload", time() - t0)
 
+        log_phase_memory(f"start_of_train iter={rollout_id}", args.rollout_num_gpus)
         if args.use_critic:
             critic_train_handle = critic_model.async_train(rollout_id, rollout_data_ref)
             if rollout_id >= args.num_critic_only_steps and not args.critic_train_only:
@@ -92,6 +95,8 @@ def train(args):
             ray.get(critic_train_handle)
         else:
             ray.get(actor_model.async_train(rollout_id, rollout_data_ref))
+
+        log_phase_memory(f"end_of_train iter={rollout_id}", args.rollout_num_gpus)
 
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             save(rollout_id)

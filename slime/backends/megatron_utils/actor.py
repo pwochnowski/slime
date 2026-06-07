@@ -165,11 +165,14 @@ class MegatronTrainRayActor(TrainRayActor):
     def sleep(self) -> None:
         assert self.args.offload_train
 
-        clear_memory(clear_host_memory=True)
+        with timer("empty_cache"):
+            clear_memory(clear_host_memory=True)
         print_memory("before offload model")
-        destroy_process_groups()
+        with timer("nccl_teardown"):
+            destroy_process_groups()
 
-        torch_memory_saver.pause()
+        with timer("offload_model"):
+            torch_memory_saver.pause()
 
         print_memory("after offload model")
 
@@ -178,10 +181,11 @@ class MegatronTrainRayActor(TrainRayActor):
         assert self.args.offload_train
         print_memory("before wake_up model")
 
-        torch_memory_saver.resume()
-
+        with timer("reload_model"):
+            torch_memory_saver.resume()
         clear_memory()
-        reload_process_groups()
+        with timer("nccl_rebuild"):
+            reload_process_groups()
         print_memory("after wake_up model")
 
     def _get_rollout_data(self, rollout_data_ref: Box) -> RolloutBatch:
