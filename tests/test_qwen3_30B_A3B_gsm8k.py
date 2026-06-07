@@ -22,7 +22,7 @@ def prepare():
     os.environ["GCR_PRELOAD_PATH"] = "/root/GCR/GCR/libpreload.so:/root/GCR/GCR/libcuda.so"
     os.environ["PYTHONUNBUFFERED"] = "1"
 
-    U.convert_checkpoint(model_name=MODEL_NAME, megatron_model_type=MODEL_TYPE, num_gpus_per_node=NUM_GPUS)
+    U.convert_checkpoint(model_name=MODEL_NAME, megatron_model_type=MODEL_TYPE, num_gpus_per_node=4, tensor_model_parallel_size=4, extra_args="--padded-vocab-size 151936 --expert-tensor-parallel-size 1")
 
 
 def execute():
@@ -77,8 +77,8 @@ def execute():
         "--weight-decay 0.1 "
         "--adam-beta1 0.9 "
         "--adam-beta2 0.98 "
-        "--optimizer-cpu-offload "
-        "--overlap-cpu-optimizer-d2h-h2d "
+        # "--optimizer-cpu-offload "
+        # "--overlap-cpu-optimizer-d2h-h2d "
         "--use-precision-aware-optimizer "
     )
 
