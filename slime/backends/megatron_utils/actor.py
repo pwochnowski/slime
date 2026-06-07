@@ -199,13 +199,7 @@ class MegatronTrainRayActor(TrainRayActor):
             else:
                 optimizers = [self.optimizer]
             for opt in optimizers:
-                inner_opt = opt.optimizer
-                for group in inner_opt.param_groups:
-                    for p in group['params']:
-                        if len(inner_opt.state[p]) == 0:
-                            inner_opt.state[p]['step'] = torch.tensor(0.0)
-                            inner_opt.state[p]['exp_avg'] = torch.zeros_like(p.data)
-                            inner_opt.state[p]['exp_avg_sq'] = torch.zeros_like(p.data)
+                opt.init_state_fn(opt.optimizer, opt.config)
 
     def _get_rollout_data(self, rollout_data_ref: Box) -> RolloutBatch:
         # Fetch data through ray on CPU, not sure if this will be performance bottleneck.
