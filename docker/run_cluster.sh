@@ -50,9 +50,9 @@ singularity exec --nv --contain --writable-tmpfs \
         export PIP_TRUSTED_HOST=mirrors.tuna.tsinghua.edu.cn
         PIP_CACHE=/root/models/.pip_cache
         mkdir -p \$PIP_CACHE
-        pip install --cache-dir \$PIP_CACHE -e /root/slime
-        pip install --cache-dir \$PIP_CACHE -e /root/Megatron-LM
-        pip install --cache-dir \$PIP_CACHE -e /sgl-workspace/sglang/python
+        pip install --cache-dir \$PIP_CACHE -q -e /root/slime
+        pip install --cache-dir \$PIP_CACHE -q -e /root/Megatron-LM
+        pip install --cache-dir \$PIP_CACHE -q -e /sgl-workspace/sglang/python
 
         export PYTHONUNBUFFERED=1
         export CUDA_ROOT='/usr/local/cuda' 

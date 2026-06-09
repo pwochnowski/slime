@@ -5,11 +5,16 @@ MODEL_NAME = "Qwen3-30B-A3B"
 MODEL_TYPE = "qwen3-30B-A3B"
 NUM_GPUS = 8
 
-TP_SIZE = 2
-PP_SIZE = 2
-CP_SIZE = 2
-EP_SIZE = 2
-ETP_SIZE = 1
+# Megatron (training) parallelism
+MEGATRON_TP_SIZE = 2
+MEGATRON_PP_SIZE = 2
+MEGATRON_CP_SIZE = 2
+MEGATRON_EP_SIZE = 2
+MEGATRON_ETP_SIZE = 2
+
+# SGLang (rollout) parallelism
+SGLANG_PP_SIZE = 2
+SGLANG_EP_SIZE = 2
 
 WORKER_ENV_VARS = {
     "NCCL_CUMEM_ENABLE": "1",
@@ -26,14 +31,12 @@ def prepare():
     os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["PYTHONUNBUFFERED"] = "1"
 
-    # don't need without --ref
-    # U.convert_checkpoint(model_name=MODEL_NAME, megatron_model_type=MODEL_TYPE, num_gpus_per_node=TP_SIZE * PP_SIZE, tensor_model_parallel_size=TP_SIZE, extra_args=f"--expert-tensor-parallel-size {ETP_SIZE}")
 
 
 def execute():
     ckpt_args = (
         f"--hf-checkpoint /root/models/{MODEL_NAME} "
-        # f"--ref-load /root/{MODEL_NAME}_torch_dist "
+        f"--ref-load /root/models/{MODEL_NAME} "
     )
 
     rollout_args = (
@@ -43,7 +46,7 @@ def execute():
         "--apply-chat-template "
         "--rollout-shuffle "
         "--rm-type math "
-        "--num-rollout 2 "
+        "--num-rollout 5 "
         "--rollout-batch-size 4 "
         "--n-samples-per-prompt 4 "
         "--global-batch-size 16 "
@@ -52,12 +55,12 @@ def execute():
     )
 
     perf_args = (
-        f"--tensor-model-parallel-size {TP_SIZE} "
+        f"--tensor-model-parallel-size {MEGATRON_TP_SIZE} "
         "--sequence-parallel "
-        f"--pipeline-model-parallel-size {PP_SIZE} "
-        f"--context-parallel-size {CP_SIZE} "
-        f"--expert-model-parallel-size {EP_SIZE} "
-        f"--expert-tensor-parallel-size {ETP_SIZE} "
+        f"--pipeline-model-parallel-size {MEGATRON_PP_SIZE} "
+        f"--context-parallel-size {MEGATRON_CP_SIZE} "
+        f"--expert-model-parallel-size {MEGATRON_EP_SIZE} "
+        f"--expert-tensor-parallel-size {MEGATRON_ETP_SIZE} "
         "--recompute-granularity full "
         "--recompute-method uniform "
         "--recompute-num-layers 1 "
@@ -86,8 +89,8 @@ def execute():
 
     sglang_args = (
         f"--rollout-num-gpus-per-engine {NUM_GPUS} "
-        f"--sglang-pipeline-parallel-size {PP_SIZE} "
-        f"--sglang-expert-parallel-size {EP_SIZE} "
+        f"--sglang-pipeline-parallel-size {SGLANG_PP_SIZE} "
+        f"--sglang-expert-parallel-size {SGLANG_EP_SIZE} "
         "--sglang-mem-fraction-static 0.8 "
         "--sglang-cuda-graph-max-bs 32 "
         "--sglang-max-running-requests 512 "
@@ -106,6 +109,7 @@ def execute():
         "--actor-num-gpus-per-node 8 "
         "--colocate "
         "--moe-token-dispatcher-type alltoall "
+        "--megatron-to-hf-mode bridge "
     )
 
     train_args = (
