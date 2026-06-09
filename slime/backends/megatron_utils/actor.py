@@ -2,7 +2,6 @@ import logging
 import os
 import random
 import socket
-import time
 from argparse import Namespace
 from contextlib import nullcontext
 
@@ -42,27 +41,6 @@ from .update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 logging.getLogger("megatron").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
-
-
-def _log_allocator_stats(label: str) -> None:
-    """Log PyTorch CUDA caching allocator internals for diagnosing fragmentation."""
-    try:
-        mem = torch.cuda.memory_stats()
-        gpu_id = torch.cuda.current_device()
-        free, total = torch.cuda.mem_get_info(gpu_id)
-        logger.info(
-            f"[alloc-diag] {label} gpu={gpu_id}: "
-            f"alloc={mem.get('allocated_bytes.all.current', 0) / 1e9:.2f}GB "
-            f"reserved={mem.get('reserved_bytes.all.current', 0) / 1e9:.2f}GB "
-            f"free_cuda={free / 1e9:.2f}GB "
-            f"inactive_split={mem.get('inactive_split_bytes.all.current', 0) / 1e9:.2f}GB "
-            f"segments={mem.get('segment.all.current', 0)} "
-            f"seg_allocs={mem.get('segment.all.allocated', 0)} "
-            f"retries={mem.get('num_alloc_retries', 0)} "
-            f"ooms={mem.get('num_ooms', 0)}"
-        )
-    except Exception:
-        pass
 
 
 class MegatronTrainRayActor(TrainRayActor):
@@ -205,25 +183,9 @@ class MegatronTrainRayActor(TrainRayActor):
 
         with timer("reload_model"):
             torch_memory_saver.resume()
-
-        try:
-            mem = torch.cuda.memory_stats()
-            gpu_id = torch.cuda.current_device()
-            free, _ = torch.cuda.mem_get_info(gpu_id)
-            logger.info(
-                f"[wake_up] after resume: "
-                f"alloc={mem.get('allocated_bytes.all.current', 0) / 1e9:.2f}GB "
-                f"reserved={mem.get('reserved_bytes.all.current', 0) / 1e9:.2f}GB "
-                f"free_cuda={free / 1e9:.2f}GB "
-                f"retries={mem.get('num_alloc_retries', 0)} "
-                f"inactive_split={mem.get('inactive_split_bytes.all.current', 0) / 1e9:.2f}GB"
-            )
-        except Exception:
-            pass
         clear_memory()
         with timer("nccl_rebuild"):
             reload_process_groups()
-        _log_allocator_stats("after_wake_up")
         print_memory("after wake_up model")
 
     def _get_rollout_data(self, rollout_data_ref: Box) -> RolloutBatch:
@@ -304,23 +266,7 @@ class MegatronTrainRayActor(TrainRayActor):
     def _switch_model(self, target_tag: str) -> None:
         if target_tag not in self.weights_backuper.backup_tags:
             raise ValueError(f"Cannot switch to unknown model tag: {target_tag}")
-        t0 = time.time()
         self.weights_backuper.restore(target_tag)
-        torch.cuda.synchronize()
-        t1 = time.time()
-        try:
-            mem = torch.cuda.memory_stats()
-            gpu_id = torch.cuda.current_device()
-            free, _ = torch.cuda.mem_get_info(gpu_id)
-            logger.info(
-                f"[switch-model] {self._active_model_tag}->{target_tag}: "
-                f"{t1 - t0:.2f}s "
-                f"alloc={mem.get('allocated_bytes.all.current', 0) / 1e9:.2f}GB "
-                f"reserved={mem.get('reserved_bytes.all.current', 0) / 1e9:.2f}GB "
-                f"free_cuda={free / 1e9:.2f}GB"
-            )
-        except Exception:
-            pass
         self._active_model_tag = target_tag
 
     def fill_routing_replay(self, data_iterator, num_microbatches, rollout_data):
@@ -407,12 +353,9 @@ class MegatronTrainRayActor(TrainRayActor):
         num_microbatches: list[int],
         store_prefix: str = "",
     ) -> dict[str, list[torch.Tensor]]:
-        from slime.utils.mem_utils import log_phase_memory
 
-        log_phase_memory(f"before_{store_prefix}log_probs", self.args.rollout_num_gpus)
-        _log_allocator_stats(f"before_{store_prefix}log_probs")
         with timer(f"{store_prefix}log_probs"):
-            result = forward_only(
+            return forward_only(
                 get_log_probs_and_entropy,
                 self.args,
                 self.model,
@@ -420,9 +363,6 @@ class MegatronTrainRayActor(TrainRayActor):
                 num_microbatches,
                 store_prefix=store_prefix,
             )
-        _log_allocator_stats(f"after_{store_prefix}log_probs")
-        log_phase_memory(f"after_{store_prefix}log_probs", self.args.rollout_num_gpus)
-        return result
 
     def train(self, rollout_id: int, rollout_data_ref: Box) -> None:
         if self.args.debug_rollout_only:
@@ -543,8 +483,6 @@ class MegatronTrainRayActor(TrainRayActor):
             # Train
             if self.args.use_routing_replay:
                 os.environ["ROUTING_REPLAY_STAGE"] = "replay_backward"
-
-            _log_allocator_stats(f"before_actor_train_iter{rollout_id}")
             with timer("actor_train"):
                 train(
                     rollout_id,
@@ -554,8 +492,7 @@ class MegatronTrainRayActor(TrainRayActor):
                     data_iterator,
                     num_microbatches,
                 )
-            _log_allocator_stats(f"after_actor_train_iter{rollout_id}")
-            torch.cuda.empty_cache()
+
             self.prof.step(rollout_id=rollout_id)
 
         train_dump_utils.save_debug_train_data(self.args, rollout_id=rollout_id, rollout_data=rollout_data)
