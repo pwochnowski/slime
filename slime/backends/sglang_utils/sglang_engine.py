@@ -356,16 +356,24 @@ class SGLangEngine(RayActor):
 
     def release_memory_occupation(self):
         self.flush_cache()
-        return self._make_request("release_memory_occupation")
+        t0 = time.monotonic()
+        result = self._make_request("release_memory_occupation")
+        elapsed = time.monotonic() - t0
+        logger.info(f"release_memory_occupation completed (elapsed: {elapsed:.1f}s)")
+        return result
 
     def resume_memory_occupation(self, tags: list[str] = None):
         """
         Available tags for multi-stage resume: weights, kv_cache
         """
-        return self._make_request(
+        t0 = time.monotonic()
+        result = self._make_request(
             "resume_memory_occupation",
             {"tags": tags},
         )
+        elapsed = time.monotonic() - t0
+        logger.info(f"resume_memory_occupation tags={tags} completed (elapsed: {elapsed:.1f}s)")
+        return result
 
     def check_weights(self, action: str):
         return self._make_request("weights_checker", {"action": action})

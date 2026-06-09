@@ -510,20 +510,32 @@ class RolloutManager:
 
     def offload(self):
         self.health_monitoring_pause()
+        t0 = time.monotonic()
         for srv in self.servers.values():
             srv.offload()
+        elapsed = time.monotonic() - t0
+        logger.info(f"rollout offload (release_memory_occupation) completed (elapsed: {elapsed:.1f}s)")
 
     def onload(self, tags: list[str] | None = None):
+        t0 = time.monotonic()
         for srv in self.servers.values():
             srv.onload(tags)
+        elapsed = time.monotonic() - t0
+        logger.info(f"rollout onload tags={tags} completed (elapsed: {elapsed:.1f}s)")
 
     def onload_weights(self):
+        t0 = time.monotonic()
         for srv in self.servers.values():
             srv.onload_weights()
+        elapsed = time.monotonic() - t0
+        logger.info(f"rollout onload_weights completed (elapsed: {elapsed:.1f}s)")
 
     def onload_kv(self):
+        t0 = time.monotonic()
         for srv in self.servers.values():
             srv.onload_kv()
+        elapsed = time.monotonic() - t0
+        logger.info(f"rollout onload_kv completed (elapsed: {elapsed:.1f}s)")
 
     def recover_updatable_engines(self):
         """Restart any dead rollout engines and update num_new_engines for update_weights detection.
