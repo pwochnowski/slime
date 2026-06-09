@@ -5,7 +5,10 @@ TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "0")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
-NUM_GPUS = 2
+NUM_GPUS = 4
+TP = 2
+PP = 1
+DP = NUM_GPUS // (TP * PP)
 
 # Forwarded to Ray train workers via execute_train(extra_env_vars=...).
 # Setting these in os.environ is a no-op for workers — the runtime-env-json
@@ -37,7 +40,7 @@ def prepare():
     U.exec_command("mkdir -p /root/models /root/datasets")
     U.exec_command(f"ln -sfn $(HF_HUB_OFFLINE=1 hf download Qwen/{MODEL_NAME}) /root/models/{MODEL_NAME}")
     # U.exec_command(f"huggingface-cli download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
-    U.hf_download_dataset("zhuzilin/gsm8k")
+    # U.hf_download_dataset("zhuzilin/gsm8k")
     os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["PYTHONUNBUFFERED"] = "1"
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
@@ -74,14 +77,13 @@ def execute():
     )
 
     perf_args = (
-        f"--tensor-model-parallel-size {min(NUM_GPUS, 2)} "
+        f"--tensor-model-parallel-size {TP} "
         "--sequence-parallel "
-        "--pipeline-model-parallel-size 1 "
+        f"--pipeline-model-parallel-size {PP} "
         "--context-parallel-size 1 "
-        "--expert-model-parallel-size 1 "
-        "--expert-tensor-parallel-size 1 "
         "--use-dynamic-batch-size "
-        f"--max-tokens-per-gpu {4096 if TIGHT_DEVICE_MEMORY else 4096}"
+        f"--max-tokens-per-gpu 2048 "
+        "--recompute-granularity full"
     )
 
     grpo_args = (
@@ -104,22 +106,18 @@ def execute():
     )
 
     sglang_args = (
-        f"--rollout-num-gpus-per-engine {min(NUM_GPUS, 2)} "
-        f"--sglang-mem-fraction-static {0.7 if TIGHT_DEVICE_MEMORY else 0.85} "
-        f"--sglang-cuda-graph-max-bs {8 if TIGHT_DEVICE_MEMORY else 32} "
+        f"--rollout-num-gpus-per-engine {TP} "
+        f"--sglang-data-parallel-size {DP} "
+        f"{'--sglang-enable-dp-attention ' if DP > 1 else ''}"
+        f"--sglang-mem-fraction-static 0.8 "
+        f"--sglang-cuda-graph-max-bs 16 "
+        "--sglang-disable-cuda-graph "
+        # "--sglang-attention-backend triton "
+        "--sglang-disable-radix-cache "
         "--sglang-enable-metrics "
         "--sglang-log-level warning "
         "--sglang-disable-custom-all-reduce"
     )
-
-    # ci_args = "--ci-test "
-
-    # fault_tolerance_args = (
-    #     "--use-fault-tolerance "
-    #     "--rollout-health-check-interval 5 "
-    #     "--rollout-health-check-timeout 10 "
-    #     "--rollout-health-check-first-wait 0 "
-    # )
 
     misc_args = (
         "--attention-dropout 0.0 "

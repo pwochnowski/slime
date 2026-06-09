@@ -1,11 +1,14 @@
 import os
 import slime.utils.external_utils.command_utils as U
 
-TIGHT_DEVICE_MEMORY = U.get_bool_env_var("SLIME_TEST_TIGHT_DEVICE_MEMORY", "0")
-
 MODEL_NAME = "Qwen2.5-7B-Instruct"
 MODEL_TYPE = "qwen2.5-7B"
+# MODEL_NAME = "Qwen3-4B"
+# MODEL_TYPE = "qwen3-4B"
 NUM_GPUS = 4
+TP = 4
+PP = 1
+DP = NUM_GPUS // (TP * PP)
 
 WORKER_ENV_VARS = {
     "NCCL_CUMEM_ENABLE": "1",
@@ -13,13 +16,16 @@ WORKER_ENV_VARS = {
     "NCCL_IB_DISABLE": "1",
     # "PYTORCH_ALLOC_CONF": "expandable_segments:False",
     "PYTHONUNBUFFERED": "1",
+    "NCCL_DEBUG": "WARN",
+    "NCCL_TIMEOUT": "60",
+    "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
 }
 
 
 def prepare():
     U.exec_command("mkdir -p /root/models /root/datasets")
     U.exec_command(f"ln -sfn $(HF_HUB_OFFLINE=1 hf download Qwen/{MODEL_NAME}) /root/models/{MODEL_NAME}")
-    U.hf_download_dataset("zhuzilin/gsm8k")
+    # U.hf_download_dataset("zhuzilin/gsm8k")
     os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["PYTHONUNBUFFERED"] = "1"
 
@@ -33,26 +39,26 @@ def execute():
         "--label-key label "
         "--apply-chat-template "
         "--rollout-shuffle "
-        "--rm-type math "
-        "--num-rollout 3 "
-        "--rollout-batch-size 1 "
+        "--rm-type random "
+        "--num-rollout 2 "
+        "--rollout-batch-size 2 "
         "--n-samples-per-prompt 4 "
-        "--rollout-max-response-len 1024 "
+        "--global-batch-size 4 "
+        "--rollout-max-response-len 256 "
         "--rollout-temperature 0.8 "
         "--over-sampling-batch-size 16 "
-        "--dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
-        "--global-batch-size 1 "
+        # don't drop zero-std samples
+        # "--dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
     )
 
     perf_args = (
-        f"--tensor-model-parallel-size {NUM_GPUS} "
+        f"--tensor-model-parallel-size {TP} "
         "--sequence-parallel "
-        "--pipeline-model-parallel-size 1 "
+        f"--pipeline-model-parallel-size {PP} "
         "--context-parallel-size 1 "
-        "--expert-model-parallel-size 1 "
-        "--expert-tensor-parallel-size 1 "
         "--use-dynamic-batch-size "
-        f"--max-tokens-per-gpu {4096 if TIGHT_DEVICE_MEMORY else 4096}"
+        f"--max-tokens-per-gpu {512} "
+        "--recompute-granularity full"
     )
 
     grpo_args = (
@@ -75,9 +81,13 @@ def execute():
     )
 
     sglang_args = (
-        f"--rollout-num-gpus-per-engine {NUM_GPUS} "
-        f"--sglang-mem-fraction-static {0.35 if TIGHT_DEVICE_MEMORY else 0.8} "
-        f"--sglang-cuda-graph-max-bs {8 if TIGHT_DEVICE_MEMORY else 32} "
+        f"--rollout-num-gpus-per-engine {TP} "
+        f"--sglang-data-parallel-size {DP} "
+        f"{'--sglang-enable-dp-attention ' if DP > 1 else ''}"
+        f"--sglang-mem-fraction-static 0.8 "
+        f"--sglang-cuda-graph-max-bs 16 "
+        # "--sglang-attention-backend triton "
+        "--sglang-disable-radix-cache "
         "--sglang-enable-metrics "
         "--sglang-log-level warning "
         "--sglang-disable-custom-all-reduce"
