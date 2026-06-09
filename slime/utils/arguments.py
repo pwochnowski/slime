@@ -144,7 +144,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 type=str,
                 nargs="*",
                 default=None,
-                help="""List of regex patterns of parameter names to TRAIN. All other parameters will be FROZEN. 
+                help=r"""List of regex patterns of parameter names to TRAIN. All other parameters will be FROZEN.
                         Supports Python regex syntax (re.search).
 
                         Examples:
