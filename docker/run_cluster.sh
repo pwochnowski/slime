@@ -55,6 +55,12 @@ singularity exec --nv --contain --writable-tmpfs \
         pip install --cache-dir \$PIP_CACHE -q -e /sgl-workspace/sglang/python
 
         export PYTHONUNBUFFERED=1
+        # Suppress noisy external library logs (must be set before any python
+        # process starts so torch C++ logging picks them up at import time)
+        export TORCH_CPP_LOG_LEVEL=ERROR
+        export GLOO_LOG_LEVEL=ERROR
+        export PYTHONWARNINGS='ignore::FutureWarning,ignore::UserWarning'
+        export SGLANG_LOGGING_CONFIG_PATH=/root/slime/docker/sglang_logging_config.json
         export CUDA_ROOT='/usr/local/cuda' 
         export PATH="\$CUDA_ROOT/bin:/root/GCR/GCR:\$PATH"
         export FLASHINFER_DISABLE_VERSION_CHECK=1

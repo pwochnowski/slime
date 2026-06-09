@@ -115,12 +115,15 @@ class ServerGroup:
                     "SGLANG_JIT_DEEPGEMM_PRECOMPILE": "true",
                     "SGLANG_JIT_DEEPGEMM_FAST_WARMUP": "true",
                     "SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
-                    "SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
                     "SGLANG_MEMORY_SAVER_CUDA_GRAPH": "true",
                     "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_FALLBACK_VARIANT": "true",
                     "SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION": "false",
                     "SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE": "false",
                     "SLIME_ENABLE_PROFILING": "true",
+                    # Suppress noisy external library logs
+                    "GLOO_LOG_LEVEL": "ERROR",
+                    "TORCH_CPP_LOG_LEVEL": "ERROR",
+                    "PYTHONWARNINGS": "ignore::FutureWarning,ignore::UserWarning",
                 }.items()
             }
 
