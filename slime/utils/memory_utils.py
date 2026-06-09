@@ -43,8 +43,11 @@ def print_memory(msg, clear_before_print: bool = False):
         clear_memory()
 
     memory_info = available_memory()
-    # Need to print for all ranks, b/c different rank can have different behaviors
+    device = torch.cuda.current_device()
+    free, total = torch.cuda.mem_get_info(device)
+    used_gb = _byte_to_gb(total - free)
+    free_gb = _byte_to_gb(free)
     logger.info(
-        f"[Rank {dist.get_rank()}] Memory-Usage {msg}{' (cleared before print)' if clear_before_print else ''}: {memory_info}"
+        f"[Rank {dist.get_rank()}] Memory-Usage {msg}: gpu{device} used={used_gb}G free={free_gb}G"
     )
     return memory_info
