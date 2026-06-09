@@ -3,7 +3,7 @@
 set -e
 
 # Pull the latest image
-docker pull slimerl/slime:latest
+# docker pull slimerl/slime:latest
 
 # Start the container
 docker run --rm --gpus all --privileged --ipc=host --name slime_og \
@@ -13,7 +13,7 @@ docker run --rm --gpus all --privileged --ipc=host --name slime_og \
     -v /home/paul/repos/sglang_og:/sgl-workspace/sglang \
     -v /mnt/huge:/mnt/huge \
     --shm-size=16g --ulimit memlock=-1 --ulimit stack=67108864 \
-    -td slimerl/slime:latest /bin/zsh
+    -td slimerl/slime:working /bin/zsh
 
 # Install packages, build GCR, configure shell
 docker exec slime_og bash /root/slime/docker/init_container.sh
