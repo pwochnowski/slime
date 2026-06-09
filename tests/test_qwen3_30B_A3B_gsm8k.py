@@ -30,6 +30,8 @@ def prepare():
     U.hf_download_dataset("zhuzilin/gsm8k")
     os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["PYTHONUNBUFFERED"] = "1"
+    os.environ["GCR_HOME"] = "/root/GCR"
+    os.environ["GCR_PRELOAD_PATH"] = "/root/GCR/GCR/libpreload.so:/root/GCR/GCR/libcuda.so"
 
 
 
@@ -82,8 +84,8 @@ def execute():
         "--weight-decay 0.1 "
         "--adam-beta1 0.9 "
         "--adam-beta2 0.98 "
-        "--optimizer-cpu-offload "
-        "--overlap-cpu-optimizer-d2h-h2d "
+        # "--optimizer-cpu-offload "
+        # "--overlap-cpu-optimizer-d2h-h2d "
         "--use-precision-aware-optimizer "
     )
 
@@ -97,6 +99,7 @@ def execute():
         "--sglang-enable-metrics "
         "--sglang-log-level warning "
         "--sglang-disable-custom-all-reduce"
+        "--sglang-enable-gcr "
     )
 
     misc_args = (

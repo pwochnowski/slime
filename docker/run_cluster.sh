@@ -23,18 +23,23 @@ if [ ! -f "$SIF_PATH" ]; then
     singularity pull "$SIF_PATH" "docker://${DOCKER_IMAGE}"
 fi
 
+GCR_OFFLOAD="${WORK_DIR}/.gcr_offload"
 SING_TMP="${WORK_DIR}/.singularity/tmp"
 SING_ROOT="${WORK_DIR}/.singularity/root"
-mkdir -p "$SING_TMP" "$SING_ROOT" 
+SING_HUGE="/dev/shm/${USER}/huge"
+mkdir -p "$GCR_OFFLOAD" "$SING_TMP" "$SING_ROOT" "$SING_HUGE"
 
 singularity exec --nv --contain --writable-tmpfs \
     --bind "$SING_TMP":/tmp \
     --bind "$SING_ROOT":/root \
     --bind "$CACHE_DIR":/root/.cache/huggingface \
     --bind "$WORK_DIR/models":/root/models \
+    --bind "$WORK_DIR/GCR":/root/GCR \
     --bind "$WORK_DIR/slime":/root/slime \
     --bind "$WORK_DIR/Megatron-LM":/root/Megatron-LM \
     --bind "$WORK_DIR/sglang":/sgl-workspace/sglang \
+    --bind "$GCR_OFFLOAD":/root/gcr_offload \
+    --bind "$SING_HUGE":/mnt/huge \
     --bind /lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libcuda.so \
     --bind /lib/x86_64-linux-gnu/libcuda.so.1:/usr/lib/x86_64-linux-gnu/libcuda.so.1 \
     "$SIF_PATH" bash -c "
@@ -53,11 +58,16 @@ singularity exec --nv --contain --writable-tmpfs \
         pip install --cache-dir \$PIP_CACHE -q -e /root/slime
         pip install --cache-dir \$PIP_CACHE -q -e /root/Megatron-LM
         pip install --cache-dir \$PIP_CACHE -q -e /sgl-workspace/sglang/python
+        pip install --cache-dir \$PIP_CACHE -q -e /root/GCR
 
         export PYTHONUNBUFFERED=1
         export CUDA_ROOT='/usr/local/cuda' 
         export PATH="\$CUDA_ROOT/bin:/root/GCR/GCR:\$PATH"
         export FLASHINFER_DISABLE_VERSION_CHECK=1
+        export GCR_HOME="/root/GCR"
+        # export GCR_OFFLOAD_DIR="/root/gcr_offload"
+        export CXX=g++
+        make CXX=g++ -C /root/GCR/GCR clean all
 
         $*
     "
