@@ -1,4 +1,6 @@
 import logging
+import os
+import warnings
 
 import wandb
 
@@ -8,6 +10,29 @@ from .tensorboard_utils import _TensorboardAdapter
 _LOGGER_CONFIGURED = False
 
 
+def _suppress_external_noise():
+    """Set env vars and warning filters to silence noisy external library output."""
+    # Gloo distributed backend connection spam
+    os.environ.setdefault("GLOO_LOG_LEVEL", "ERROR")
+    # PyTorch C++ warnings (NCCL unbatched P2P, ProcessGroupNCCL, etc.)
+    os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
+
+    # Suppress Python warnings in spawned subprocesses (e.g. SGLang engine)
+    os.environ.setdefault("PYTHONWARNINGS", "ignore::FutureWarning,ignore::UserWarning")
+
+    # Python warnings in the current process
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", message=".*MimoModelConfig is experimental.*")
+    warnings.filterwarnings("ignore", message=".*ORJSONResponse is deprecated.*")
+
+    # Silence noisy sglang loggers (model import errors, MoE kernel config)
+    for name in [
+        "sglang.srt.models.registry",
+        "sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_config",
+    ]:
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+
 # ref: SGLang
 def configure_logger(prefix: str = ""):
     global _LOGGER_CONFIGURED
@@ -15,6 +40,8 @@ def configure_logger(prefix: str = ""):
         return
 
     _LOGGER_CONFIGURED = True
+
+    _suppress_external_noise()
 
     logging.basicConfig(
         level=logging.INFO,
