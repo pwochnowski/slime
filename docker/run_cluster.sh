@@ -71,6 +71,7 @@ singularity exec --nv --contain --writable-tmpfs \
         export PATH="\$CUDA_ROOT/bin:/root/GCR/GCR:\$PATH"
         export FLASHINFER_DISABLE_VERSION_CHECK=1
         export GCR_HOME="/root/GCR"
+        export GCR_PRELOAD_PATH="/root/GCR/GCR/libpreload.so:/root/GCR/GCR/libcuda.so"
         # export GCR_OFFLOAD_DIR="/root/gcr_offload"
         export CXX=g++
         make CXX=g++ -C /root/GCR/GCR clean all
