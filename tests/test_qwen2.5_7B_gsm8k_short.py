@@ -18,6 +18,7 @@ WORKER_ENV_VARS = {
     # "PYTORCH_CUDA_ALLOC_CONF":"expandable_segments:True",
     # "TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC": "0",
     "PYTHONUNBUFFERED": "1",
+    "GCR_KEEP_RESIDENT": "1",
 }
 
 
