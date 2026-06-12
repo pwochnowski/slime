@@ -21,6 +21,7 @@ WORKER_ENV_VARS = {
     "NCCL_NET_DISABLE": "1",
     "NCCL_IB_DISABLE": "1",
     "PYTHONUNBUFFERED": "1",
+    "GCR_KEEP_RESIDENT": "1",
 }
 
 
@@ -98,7 +99,7 @@ def execute():
         "--sglang-max-running-requests 512 "
         "--sglang-enable-metrics "
         "--sglang-log-level warning "
-        "--sglang-disable-custom-all-reduce"
+        "--sglang-disable-custom-all-reduce "
         "--sglang-enable-gcr "
     )
 
