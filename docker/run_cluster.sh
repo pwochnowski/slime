@@ -26,8 +26,7 @@ fi
 GCR_OFFLOAD="${WORK_DIR}/.gcr_offload"
 SING_TMP="${WORK_DIR}/.singularity/tmp"
 SING_ROOT="${WORK_DIR}/.singularity/root"
-SING_HUGE="/dev/shm/${USER}/huge"
-mkdir -p "$GCR_OFFLOAD" "$SING_TMP" "$SING_ROOT" "$SING_HUGE"
+mkdir -p "$GCR_OFFLOAD" "$SING_TMP" "$SING_ROOT"
 
 singularity exec --nv --contain --writable-tmpfs \
     --bind "$SING_TMP":/tmp \
@@ -39,7 +38,7 @@ singularity exec --nv --contain --writable-tmpfs \
     --bind "$WORK_DIR/Megatron-LM":/root/Megatron-LM \
     --bind "$WORK_DIR/sglang":/sgl-workspace/sglang \
     --bind "$GCR_OFFLOAD":/root/gcr_offload \
-    --bind "$SING_HUGE":/mnt/huge \
+    --bind "$GCR_OFFLOAD":/mnt/huge \
     --bind /lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libcuda.so \
     --bind /lib/x86_64-linux-gnu/libcuda.so.1:/usr/lib/x86_64-linux-gnu/libcuda.so.1 \
     "$SIF_PATH" bash -c "
