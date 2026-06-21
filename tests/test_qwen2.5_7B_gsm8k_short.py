@@ -6,10 +6,14 @@ import slime.utils.external_utils.command_utils as U
 MODEL_NAME = "Qwen2.5-7B-Instruct"
 MODEL_TYPE = "qwen2.5-7B"
 
-NUM_GPUS = 4
+NUM_GPUS = 8
 TP = 4
-PP = 1
-DP = NUM_GPUS // (TP * PP)
+PP = 2
+DP = NUM_GPUS // (TP * PP)  # megatron training data-parallel degree
+
+# sglang per-engine dp-attention degree. Must divide gpus-per-engine (=TP).
+# 1 => pure TP inference, dp-attention off. Engines = NUM_GPUS // TP.
+SGLANG_DP = 1
 
 WORKER_ENV_VARS = {
     "NCCL_CUMEM_ENABLE": "1",
@@ -84,9 +88,9 @@ def execute():
 
     sglang_args = (
         f"--rollout-num-gpus-per-engine {TP} "
-        f"--sglang-data-parallel-size {DP} "
-        f"{'--sglang-enable-dp-attention ' if DP > 1 else ''}"
         f"--sglang-mem-fraction-static 0.9 "
+        f"--sglang-data-parallel-size {SGLANG_DP} "
+        f"{'--sglang-enable-dp-attention ' if SGLANG_DP > 1 else ''}"
         f"--sglang-cuda-graph-max-bs 16 "
         # "--sglang-attention-backend triton "
         "--sglang-disable-radix-cache "
