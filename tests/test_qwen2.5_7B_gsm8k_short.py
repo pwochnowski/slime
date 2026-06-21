@@ -6,9 +6,9 @@ import slime.utils.external_utils.command_utils as U
 MODEL_NAME = "Qwen2.5-7B-Instruct"
 MODEL_TYPE = "qwen2.5-7B"
 
-NUM_GPUS = 8
+NUM_GPUS = 4
 TP = 4
-PP = 2
+PP = 1
 DP = NUM_GPUS // (TP * PP)  # megatron training data-parallel degree
 
 # sglang per-engine dp-attention degree. Must divide gpus-per-engine (=TP).
@@ -23,6 +23,7 @@ WORKER_ENV_VARS = {
     # "TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC": "0",
     "PYTHONUNBUFFERED": "1",
     "GCR_KEEP_RESIDENT": "1",
+    "GCR_HUGETLB_DIR": "/mnt/huge",
 }
 
 
