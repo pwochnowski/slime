@@ -5,10 +5,14 @@ MODEL_NAME = "Qwen2.5-7B-Instruct"
 MODEL_TYPE = "qwen2.5-7B"
 # MODEL_NAME = "Qwen3-4B"
 # MODEL_TYPE = "qwen3-4B"
-NUM_GPUS = 4
+NUM_GPUS = 8
 TP = 4
-PP = 1
-DP = NUM_GPUS // (TP * PP)
+PP = 2
+DP = NUM_GPUS // (TP * PP)  # megatron training data-parallel degree (4)
+
+# sglang per-engine dp-attention degree. Must divide gpus-per-engine (=TP).
+# 1 => pure TP inference, dp-attention off. Engines = NUM_GPUS // TP.
+SGLANG_DP = 1
 
 WORKER_ENV_VARS = {
     "NCCL_CUMEM_ENABLE": "1",
@@ -32,7 +36,8 @@ WORKER_ENV_VARS = {
 
 def prepare():
     U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"ln -sfn $(HF_HUB_OFFLINE=1 hf download Qwen/{MODEL_NAME}) /root/models/{MODEL_NAME}")
+    model_path = f"/root/models/{MODEL_NAME}"
+    assert os.path.isdir(model_path), f"Model not found at {model_path} (expected mounted in /root/models)"
     # U.hf_download_dataset("zhuzilin/gsm8k")
     os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["PYTHONUNBUFFERED"] = "1"
@@ -47,14 +52,14 @@ def execute():
         "--label-key label "
         "--apply-chat-template "
         "--rollout-shuffle "
-        "--rm-type random "
-        "--num-rollout 2 "
-        "--rollout-batch-size 2 "
-        "--n-samples-per-prompt 4 "
-        "--global-batch-size 4 "
-        "--rollout-max-response-len 256 "
+        "--rm-type math "
+        "--num-rollout 6 "
+        "--rollout-batch-size 32 "
+        "--n-samples-per-prompt 8 "
+        "--global-batch-size 64 "
+        "--rollout-max-response-len 2048 "
         "--rollout-temperature 0.8 "
-        "--over-sampling-batch-size 16 "
+        "--over-sampling-batch-size 64 "
         # don't drop zero-std samples
         # "--dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
     )
@@ -65,8 +70,7 @@ def execute():
         f"--pipeline-model-parallel-size {PP} "
         "--context-parallel-size 1 "
         "--use-dynamic-batch-size "
-        f"--max-tokens-per-gpu {512} "
-        "--recompute-granularity full"
+        f"--max-tokens-per-gpu {8192}"
     )
 
     grpo_args = (
@@ -90,9 +94,10 @@ def execute():
 
     sglang_args = (
         f"--rollout-num-gpus-per-engine {TP} "
-        f"--sglang-data-parallel-size {DP} "
-        f"{'--sglang-enable-dp-attention ' if DP > 1 else ''}"
-        f"--sglang-mem-fraction-static 0.8 "
+        f"--sglang-data-parallel-size {SGLANG_DP} "
+        f"{'--sglang-enable-dp-attention ' if SGLANG_DP > 1 else ''}"
+        f"--sglang-server-concurrency 128 "
+        f"--sglang-mem-fraction-static 0.85 "
         f"--sglang-cuda-graph-max-bs 16 "
         # "--sglang-attention-backend triton "
         "--sglang-disable-radix-cache "

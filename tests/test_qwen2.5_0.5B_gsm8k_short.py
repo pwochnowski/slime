@@ -7,7 +7,7 @@ MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
 NUM_GPUS = 4
 TP = 2
-PP = 1
+PP = 2
 DP = NUM_GPUS // (TP * PP)
 
 # Forwarded to Ray train workers via execute_train(extra_env_vars=...).
@@ -48,7 +48,7 @@ def prepare():
     U.exec_command("mkdir -p /root/models /root/datasets")
     U.exec_command(f"ln -sfn $(HF_HUB_OFFLINE=1 hf download Qwen/{MODEL_NAME}) /root/models/{MODEL_NAME}")
     # U.exec_command(f"huggingface-cli download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
-    # U.hf_download_dataset("zhuzilin/gsm8k")
+    U.hf_download_dataset("zhuzilin/gsm8k")
     os.environ["RAY_SILENT_MODE"] = "1"
     os.environ["PYTHONUNBUFFERED"] = "1"
     # os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
