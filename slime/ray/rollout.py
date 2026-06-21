@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import ray
+import requests
 import torch
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
@@ -507,6 +508,7 @@ class RolloutManager:
         start_time = time.time()
         self.rollout_id = rollout_id
         self.health_monitoring_resume()
+        self._wait_engines_healthy()
         if self.args.ci_test and self.args.use_fault_tolerance and rollout_id >= 2:
             self._try_ci_fault_injection()
         data, metrics = self._get_rollout_data(rollout_id=rollout_id)
@@ -523,6 +525,7 @@ class RolloutManager:
             # if debug train only, we don't generate evaluation data
             return
         self.health_monitoring_resume()
+        self._wait_engines_healthy()
 
         result = call_rollout_fn(self.eval_generate_rollout, self.args, rollout_id, self.data_source, evaluation=True)
         data = result.data
@@ -598,6 +601,61 @@ class RolloutManager:
 
     def check_weights(self, action: str):
         return ray.get([engine.check_weights.remote(action=action) for engine in self.rollout_engines])
+
+    def _wait_engines_healthy(self, max_attempts: int = 60, interval: float = 1.0) -> None:
+        """Block until all rollout engines answer /health_generate with 200.
+
+        GCR restore returns once GPU memory is back, but the SGLang scheduler
+        may need a moment before it accepts /generate.  The router is never
+        told engines were suspended, so any request forwarded in that window
+        fails with a connection-level error and is retried noisily.  Poll each
+        engine until ready before sending rollout traffic (mirrors the
+        flush_cache retry loop).
+        """
+        engines = [e for e in self.rollout_engines if e is not None]
+        if not engines:
+            logger.info("[health] no rollout engines to check")
+            return
+        urls = ray.get([e.get_url.remote() for e in engines])
+        logger.info(f"[health] direct-probing {len(engines)} engine(s): {urls}")
+        for attempt in range(max_attempts):
+            try:
+                ray.get([e.health_generate.remote() for e in engines])
+                logger.info(f"[health] direct engine probe OK after {attempt + 1} attempt(s)")
+                break
+            except Exception as e:
+                logger.info(f"[health] direct engine probe not ready (attempt {attempt + 1}/{max_attempts}): {e!r}")
+                time.sleep(interval)
+        else:
+            raise TimeoutError("Timeout while waiting for rollout engines to become healthy.")
+        # Direct engine probe bypasses the router.  Real rollout traffic goes
+        # through the router, whose worker connection pool may hold stale
+        # keepalive sockets after a GCR restore.  Probe the router path too —
+        # this both detects that case and warms the pool before generate.
+        self._wait_router_healthy(max_attempts, interval)
+
+    def _wait_router_healthy(self, max_attempts: int = 60, interval: float = 1.0) -> None:
+        """Probe /generate through the router (same path real traffic uses)."""
+        srv = self.server
+        if srv is None or srv.router_ip is None:
+            logger.info("[health] no router to probe")
+            return
+        url = f"http://{srv.router_ip}:{srv.router_port}/generate"
+        payload = {"text": "ping", "sampling_params": {"max_new_tokens": 1}}
+        logger.info(f"[health] router-probing {url}")
+        for attempt in range(max_attempts):
+            try:
+                resp = requests.post(url, json=payload, timeout=30)
+                resp.raise_for_status()
+                logger.info(f"[health] router probe OK after {attempt + 1} attempt(s)")
+                return
+            except Exception as e:
+                body = getattr(getattr(e, "response", None), "text", None)
+                logger.info(
+                    f"[health] router probe not ready (attempt {attempt + 1}/{max_attempts}): {e!r} body={body}"
+                )
+                time.sleep(interval)
+        raise TimeoutError("Timeout while waiting for router path to become healthy.")
 
     def _get_rollout_data(self, rollout_id):
         if self.args.load_debug_rollout_data:
