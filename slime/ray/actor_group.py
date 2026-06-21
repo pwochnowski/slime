@@ -132,6 +132,11 @@ class RayTrainGroup:
     def add_timer(self, name, elapsed):
         ray.get([actor.add_timer.remote(name, elapsed) for actor in self._actor_handlers])
 
+    def memtrace_capture(self, snapshot, rollout_id, idle_comm):
+        return ray.get(
+            [actor.memtrace_capture.remote(snapshot, rollout_id, idle_comm) for actor in self._actor_handlers]
+        )
+
     def connect(self, critic_group):
         return ray.get(
             [

@@ -59,6 +59,13 @@ class TrainRayActor(RayActor):
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         torch.cuda.set_device(f"cuda:{local_rank}")
 
+        # Enable allocation-history recording before any large allocation so every
+        # block carries an alloc stack for offline bucket attribution.
+        from slime.utils import memtrace
+
+        memtrace.init_recording("train")
+        _nccl_nvml_before = memtrace.nvml_used() if memtrace.enabled() else 0
+
         backend = args.distributed_backend
 
         dist.init_process_group(
@@ -66,6 +73,9 @@ class TrainRayActor(RayActor):
             timeout=timedelta(minutes=args.distributed_timeout_minutes),
         )
         init_gloo_group()
+
+        if memtrace.enabled():
+            memtrace.nccl_delta("train", _nccl_nvml_before, memtrace.nvml_used(), rank=dist.get_rank())
 
         args.rank = dist.get_rank()
         args.world_size = dist.get_world_size()
@@ -129,6 +139,11 @@ class TrainRayActor(RayActor):
 
     def add_timer(self, name, elapsed):
         Timer().add(name, elapsed)
+
+    def memtrace_capture(self, snapshot, rollout_id, idle_comm):
+        from slime.utils import memtrace
+
+        memtrace.capture(snapshot, iter=rollout_id, idle_comm=idle_comm, role="train")
 
     def set_rollout_manager(self, rollout_manager):
         self.rollout_manager = rollout_manager

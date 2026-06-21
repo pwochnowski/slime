@@ -287,6 +287,9 @@ def connect_rollout_engines_from_distributed(
         )
         for i, engine in enumerate(rollout_engines)
     ]
+    from slime.utils import memtrace
+
+    _nccl_nvml_before = memtrace.nvml_used() if memtrace.enabled() else 0
     model_update_groups = init_process_group(
         backend="nccl",
         init_method=f"tcp://{master_address}:{master_port}",
@@ -295,6 +298,8 @@ def connect_rollout_engines_from_distributed(
         group_name=group_name,
     )
     ray.get(refs)
+    if memtrace.enabled():
+        memtrace.nccl_delta("weight_update", _nccl_nvml_before, memtrace.nvml_used(), role="train", rank=0)
     return model_update_groups
 
 

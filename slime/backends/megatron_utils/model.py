@@ -307,6 +307,7 @@ def train_one_step(
     optimizer: MegatronOptimizer,
     opt_param_scheduler: OptimizerParamScheduler,
     num_microbatches: int,
+    is_peak_step: bool = False,
 ) -> tuple[dict[str, float], float]:
     """Execute a single pipeline-parallel training step.
 
@@ -459,6 +460,14 @@ def train_one_step(
         assert update_successful
         opt_param_scheduler.step(increment=args.global_batch_size)
 
+    # Training steady-state peak: weights + optimizer states + gradients are all
+    # resident here (backward done, grads not yet freed). Captured once per rollout
+    # on the last step to bound overhead.
+    if is_peak_step:
+        from slime.utils import memtrace
+
+        memtrace.capture("train_peak", iter=rollout_id, idle_comm="inference", role="train")
+
     # release grad
     for model_chunk in model:
         model_chunk.zero_grad_buffer()
@@ -599,6 +608,7 @@ def train(
             optimizer,
             opt_param_scheduler,
             num_microbatches[step_id],
+            is_peak_step=(step_id == num_steps_per_rollout - 1),
         )
 
         if step_id == 0:

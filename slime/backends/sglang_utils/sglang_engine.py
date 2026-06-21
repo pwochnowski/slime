@@ -441,6 +441,19 @@ class SGLangEngine(RayActor):
         response.raise_for_status()
         return response
 
+    def dump_memory_snapshot(self, snapshot, iter=-1, idle_comm="none", out_dir="", warmup=False):
+        """Trigger a per-rank GPU memory snapshot on every scheduler (RL memory tracing)."""
+        return self._make_request(
+            "dump_memory_snapshot",
+            {
+                "snapshot": snapshot,
+                "iter": iter,
+                "idle_comm": idle_comm,
+                "out_dir": out_dir,
+                "warmup": warmup,
+            },
+        )
+
     def post_process_weights(
         self,
         restore_weights_before_load: bool = False,

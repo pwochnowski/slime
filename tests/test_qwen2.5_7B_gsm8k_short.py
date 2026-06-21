@@ -19,6 +19,14 @@ WORKER_ENV_VARS = {
     "NCCL_DEBUG": "WARN",
     "NCCL_TIMEOUT": "60",
     "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+
+    # Per-phase GPU memory tracing (offline stacked-bar analysis).
+    # Goes into the ray-job runtime_env -> reaches the driver (train.py phase
+    # gating) and the megatron train actors. The sglang subprocess is covered
+    # separately via slime/ray/rollout.py env_vars.
+    # "SLIME_MEMTRACE": "1",
+    # "SLIME_MEMTRACE_DIR": f"/tmp/mem_trace_{MODEL_TYPE}",
+    # "SLIME_MEMTRACE_WARMUP": "2",
 }
 
 

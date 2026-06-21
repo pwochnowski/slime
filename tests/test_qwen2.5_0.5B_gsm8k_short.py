@@ -33,6 +33,14 @@ WORKER_ENV_VARS = {
     # "CUDA_LAUNCH_BLOCKING": "1",
     "PYTORCH_ALLOC_CONF": "expandable_segments:False",
     "PYTHONUNBUFFERED": "1",
+
+    # Per-phase GPU memory tracing (offline stacked-bar analysis).
+    # Goes into the ray-job runtime_env -> reaches the driver (train.py phase
+    # gating) and the megatron train actors. The sglang subprocess is covered
+    # separately via slime/ray/rollout.py env_vars.
+    "SLIME_MEMTRACE": "1",
+    "SLIME_MEMTRACE_DIR": "/tmp/mem_trace_qwen2.5_0.5B",
+    "SLIME_MEMTRACE_WARMUP": "1",
 }
 
 

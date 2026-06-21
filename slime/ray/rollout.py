@@ -120,6 +120,11 @@ class ServerGroup:
                     "SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION": "false",
                     "SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE": "false",
                     "SLIME_ENABLE_PROFILING": "true",
+                    # Per-phase GPU memory tracing: the sglang scheduler reads
+                    # SLIME_MEMTRACE at startup to enable _record_memory_history.
+                    "SLIME_MEMTRACE": "0",
+                    "SLIME_MEMTRACE_DIR": "",
+                    "SLIME_MEMTRACE_WARMUP": "2",
                     # Suppress noisy external library logs
                     "GLOO_LOG_LEVEL": "ERROR",
                     "TORCH_CPP_LOG_LEVEL": "ERROR",
@@ -510,6 +515,28 @@ class RolloutManager:
 
     def load(self, rollout_id=None):
         self.data_source.load(rollout_id)
+
+    def memtrace_capture(self, snapshot, rollout_id, idle_comm, warmup=None):
+        """Broadcast a per-rank GPU memory snapshot request to all rollout engines."""
+        from slime.utils import memtrace
+
+        if not memtrace.enabled():
+            return
+        if warmup is None:
+            warmup = rollout_id < memtrace.warmup_count()
+        out_dir = os.environ.get("SLIME_MEMTRACE_DIR", "")
+        return ray.get(
+            [
+                engine.dump_memory_snapshot.remote(
+                    snapshot=snapshot,
+                    iter=rollout_id,
+                    idle_comm=idle_comm,
+                    out_dir=out_dir,
+                    warmup=warmup,
+                )
+                for engine in self.rollout_engines
+            ]
+        )
 
     def offload(self):
         self.health_monitoring_pause()
