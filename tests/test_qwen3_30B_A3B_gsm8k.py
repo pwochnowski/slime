@@ -22,6 +22,7 @@ WORKER_ENV_VARS = {
     "NCCL_IB_DISABLE": "1",
     "PYTHONUNBUFFERED": "1",
     "GCR_KEEP_RESIDENT": "1",
+    "GCR_PREFAULT_MB": "81920",
 }
 
 
@@ -33,6 +34,7 @@ def prepare():
     os.environ["PYTHONUNBUFFERED"] = "1"
     os.environ["GCR_HOME"] = "/root/GCR"
     os.environ["GCR_PRELOAD_PATH"] = "/root/GCR/GCR/libpreload.so:/root/GCR/GCR/libcuda.so"
+    os.environ["GCR_PREFAULT_MB"] = "81920"
 
 
 
