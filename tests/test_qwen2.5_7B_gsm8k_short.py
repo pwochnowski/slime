@@ -46,13 +46,13 @@ def execute():
         "--apply-chat-template "
         "--rollout-shuffle "
         "--rm-type math "
-        "--num-rollout 6 "
-        "--rollout-batch-size 32 "
-        "--n-samples-per-prompt 8 "
-        "--global-batch-size 64 "
-        "--rollout-max-response-len 2048 "
+        "--num-rollout 2 "
+        "--rollout-batch-size 2 "
+        "--n-samples-per-prompt 4 "
+        "--global-batch-size 4 "
+        "--rollout-max-response-len 256 "
         "--rollout-temperature 0.8 "
-        "--over-sampling-batch-size 64 "
+        "--over-sampling-batch-size 16 "
         # don't drop zero-std samples
         # "--dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
     )
@@ -63,7 +63,8 @@ def execute():
         f"--pipeline-model-parallel-size {PP} "
         "--context-parallel-size 1 "
         "--use-dynamic-batch-size "
-        f"--max-tokens-per-gpu {8192}"
+        f"--max-tokens-per-gpu {512} "
+        "--recompute-granularity full"
     )
 
     grpo_args = (
@@ -87,10 +88,9 @@ def execute():
 
     sglang_args = (
         f"--rollout-num-gpus-per-engine {TP} "
+        f"--sglang-mem-fraction-static 0.9 "
         f"--sglang-data-parallel-size {SGLANG_DP} "
         f"{'--sglang-enable-dp-attention ' if SGLANG_DP > 1 else ''}"
-        f"--sglang-server-concurrency 128 "
-        f"--sglang-mem-fraction-static 0.85 "
         f"--sglang-cuda-graph-max-bs 16 "
         # "--sglang-attention-backend triton "
         "--sglang-disable-radix-cache "
